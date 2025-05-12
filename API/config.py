@@ -13,3 +13,5 @@ connection = cx_Oracle.connect(
     password=clave,
     dsn=dsn
 )
+
+connection.autocommit = True

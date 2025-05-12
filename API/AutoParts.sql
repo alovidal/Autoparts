@@ -121,4 +121,4 @@ INSERT INTO BITACORA VALUES (1, 1, 'Inicio de sesión', SYSDATE);
 INSERT INTO BITACORA VALUES (2, 2, 'Generó un pedido', SYSDATE);
 INSERT INTO BITACORA VALUES (3, 3, 'Actualizó precios de productos', SYSDATE);
 
-Commit;
+COMMIT;
