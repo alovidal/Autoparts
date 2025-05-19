@@ -32,7 +32,7 @@ CREATE TABLE PRODUCTOS (
     DESCRIPCION VARCHAR2(255),
     MARCA VARCHAR2(50),
     PRECIO_UNITARIO NUMBER(10, 2) NOT NULL,
-    STOCK_TOTAL NUMBER DEFAULT 0
+    STOCK_MIN NUMBER DEFAULT 0
 );
 
 CREATE TABLE INVENTARIO (
@@ -93,9 +93,9 @@ INSERT INTO SUCURSALES VALUES (1, 'Sucursal Santiago', 'Av. Providencia 123', 'P
 INSERT INTO SUCURSALES VALUES (2, 'Sucursal Valparaíso', 'Calle Prat 456', 'Valparaíso', 'V Región');
 
 -- PRODUCTOS
-INSERT INTO PRODUCTOS VALUES (4, 'Filtro de Aceite', 'Filtro para motor gasolina', 'Bosch', 4990, 100);
-INSERT INTO PRODUCTOS VALUES (5, 'Bujía', 'Bujía estándar NGK', 'NGK', 2990, 150);
-INSERT INTO PRODUCTOS VALUES (6, 'Amortiguador', 'Amortiguador delantero', 'Monroe', 19990, 80);
+INSERT INTO PRODUCTOS VALUES (1, 'Filtro de Aceite', 'Filtro para motor gasolina', 'Bosch', 4990, 50);
+INSERT INTO PRODUCTOS VALUES (2, 'Bujía', 'Bujía estándar NGK', 'NGK', 2990, 50);
+INSERT INTO PRODUCTOS VALUES (3, 'Amortiguador', 'Amortiguador delantero', 'Monroe', 19990, 50);
 
 -- INVENTARIO
 INSERT INTO INVENTARIO VALUES (1, 1, 1, 50);

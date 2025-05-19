@@ -73,5 +73,43 @@ def rebajar_stock():
     cursor.close()
     return jsonify({'mensaje': 'Stock rebajado correctamente'})
 
+@app.route('/consultar_stock', methods=['POST'])
+def consultar_stock():
+    data = request.get_json()
+    id_sucursal = data.get('id_sucursal')
+    id_producto = data.get('id_producto')
+    cantidad = data.get('cantidad')
+
+    if not all([id_sucursal, id_producto, cantidad]):
+        return jsonify({'error': 'Faltan datos'}), 400
+
+    cursor = connection.cursor()
+
+    
+@app.route('/consultar_stock', methods=['GET'])
+def stock_producto_sucursal():
+    id_producto = request.args.get('id_producto', type=int)
+    id_sucursal = request.args.get('id_sucursal', type=int)
+
+    if not id_producto or not id_sucursal:
+        return jsonify({'error': 'Faltan parámetros id_producto o id_sucursal'}), 400
+
+    cursor = connection.cursor()
+    cursor.execute("""
+                    SELECT P.NOMBRE,
+                        I.STOCK
+                    FROM PRODUCTOS P JOIN
+                    INVENTARIO I ON P.ID_PRODUCTO = I.ID_PRODUCTO;
+    """, id_producto=id_producto, id_sucursal=id_sucursal)
+    row = cursor.fetchone()
+    cursor.close()
+    if row:
+        return jsonify({
+            'nombre': row[0],
+            'stock': int(row[3])
+        })
+    else:
+        return jsonify({'error': 'No encontrado'}), 404
+
 if __name__ == "__main__":
     app.run()
