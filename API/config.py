@@ -1,4 +1,4 @@
-import cx_Oracle
+import oracledb
 import os
 from dotenv import load_dotenv
 
@@ -6,12 +6,15 @@ load_dotenv()
 
 usuario = os.getenv("usuario")
 clave = os.getenv("clave")
-dsn = 'localhost/XEPDB1'
+wallet_dir = r"wallet"
+wallet_password = os.getenv("wallet_password")
+dsn = os.getenv("dsn")
 
-connection = cx_Oracle.connect(
+connection = oracledb.connect(
     user=usuario,
     password=clave,
-    dsn=dsn
+    dsn=dsn,
+    config_dir=wallet_dir,
+    wallet_location=wallet_dir,
+    wallet_password=wallet_password
 )
-
-connection.autocommit = True
