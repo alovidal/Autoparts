@@ -113,13 +113,8 @@ def agregar_a_carrito():
     return jsonify({'mensaje': mensaje, 'id_carrito': id_carrito}), 201
 
 
-@app.route('/carrito', methods=['GET'])
-def ver_carrito():
-    id_carrito = request.args.get('id_carrito', type=int)
-
-    if not id_carrito:
-        return jsonify({'error': 'Se requiere el ID del carrito'}), 400
-
+@app.route('/carrito/<int:id_carrito>', methods=['GET'])
+def ver_carrito(id_carrito):  # <-- Agregado aquí
     cursor = connection.cursor()
 
     cursor.execute("SELECT 1 FROM CARRITOS WHERE ID_CARRITO = :id", {'id': id_carrito})
@@ -159,6 +154,7 @@ def ver_carrito():
         'productos': carrito,
         'total_final': total_general
     })
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
