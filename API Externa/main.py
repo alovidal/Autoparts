@@ -117,9 +117,15 @@ def agregar_a_carrito():
 def ver_carrito():
     cursor = connection.cursor()
     cursor.execute("""
-        SELECT ID_CARRITO, ID_PRODUCTO, MARCA, CANTIDAD, VALOR_UNITARIO, VALOR_TOTAL
-        FROM CARRITO
-        ORDER BY ID_CARRITO
+        SELECT 
+            c.ID_CARRITO,
+            p.NOMBRE || ' - ' || p.MARCA AS nombre_completo,
+            c.CANTIDAD,
+            c.VALOR_UNITARIO,
+            c.VALOR_TOTAL
+        FROM CARRITO c
+        JOIN PRODUCTOS p ON c.ID_PRODUCTO = p.ID_PRODUCTO
+        ORDER BY c.ID_CARRITO
     """)
 
     rows = cursor.fetchall()
@@ -129,15 +135,17 @@ def ver_carrito():
     for row in rows:
         carrito.append({
             'id_carrito': row[0],
-            'id_producto': row[1],
-            'marca': row[2],
-            'cantidad': row[3],
-            'valor_unitario': float(row[4]),
-            'valor_total': float(row[5])
+            'nombre': row[1],  
+            'cantidad': row[2],
+            'valor_unitario': float(row[3]),
+            'valor_total': float(row[4])
         })
 
     return jsonify({'carrito': carrito})
 
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
+
+
 
