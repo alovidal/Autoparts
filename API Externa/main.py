@@ -64,11 +64,18 @@ def agregar_a_carrito():
         if not cursor.fetchone():
             cursor.execute("INSERT INTO CARRITOS (ID_CARRITO) VALUES (:id)", {'id': id_carrito})
 
-    cursor.execute("SELECT PRECIO_UNITARIO FROM PRODUCTOS WHERE ID_PRODUCTO = :id", {'id': id_producto})
+    cursor.execute("SELECT P.PRECIO_UNITARIO, I.STOCK FROM PRODUCTOS P JOIN INVENTARIO I ON P.ID_PRODUCTO = I.ID_PRODUCTO WHERE P.ID_PRODUCTO = :id", {'id': id_producto})
     producto = cursor.fetchone()
+
+    stock = producto[1]
+    
     if not producto:
         cursor.close()
         return jsonify({'error': 'Producto no encontrado'}), 404
+    
+    elif cantidad >= stock:
+        cursor.close()
+        return jsonify({'error': 'Cantidad no disponible en stock'}), 400
 
     valor_unitario = float(producto[0])
     valor_total = valor_unitario * cantidad
