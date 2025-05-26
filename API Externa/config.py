@@ -6,7 +6,7 @@ load_dotenv()
 
 usuario = os.getenv("usuario")
 clave = os.getenv("clave")
-wallet_dir = r"C:\Users\PC\Downloads\Wallet_IntegracionPlataformasBD"
+wallet_dir = r"wallet"
 wallet_password = os.getenv("wallet_password")
 dsn = os.getenv("dsn")
 

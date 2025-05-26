@@ -40,25 +40,43 @@ def valor_producto(id_producto):
     else:
         return jsonify({'error': 'Producto no encontrado'}), 404
 
-@app.route('/carrito', methods=['POST'])
+@app.route('/producto_carrito', methods=['POST'])
 def agregar_a_carrito():
-    data = request.json
-    id_producto = data['id_producto']
-    cantidad = data['cantidad']
+    if not request.is_json:
+        return jsonify({'error': 'Content-Type debe ser application/json'}), 415
+
+    data = request.get_json()
+    id_carrito = data.get('id_carrito')
+    id_producto = data.get('id_producto')
+    cantidad = data.get('cantidad')
+
+    if not all([id_producto, cantidad]):
+        return jsonify({'error': 'Faltan datos obligatorios'}), 400
 
     cursor = connection.cursor()
 
+    if id_carrito is None:
+        cursor.execute("INSERT INTO CARRITOS DEFAULT VALUES RETURNING ID_CARRITO INTO :id", {'id': cursor.var(int)})
+        id_carrito = cursor.getimplicitresults()[0][0]
+
+    else:
+        cursor.execute("SELECT 1 FROM CARRITOS WHERE ID_CARRITO = :id", {'id': id_carrito})
+        if not cursor.fetchone():
+            cursor.execute("INSERT INTO CARRITOS (ID_CARRITO) VALUES (:id)", {'id': id_carrito})
+
     cursor.execute("SELECT PRECIO_UNITARIO FROM PRODUCTOS WHERE ID_PRODUCTO = :id", {'id': id_producto})
     producto = cursor.fetchone()
-
     if not producto:
+        cursor.close()
         return jsonify({'error': 'Producto no encontrado'}), 404
 
     valor_unitario = float(producto[0])
     valor_total = valor_unitario * cantidad
+
     cursor.execute("""
-        SELECT CANTIDAD FROM CARRITO WHERE ID_PRODUCTO = :id
-    """, {'id': id_producto})
+        SELECT CANTIDAD FROM CARRITO_PRODUCTOS 
+        WHERE ID_CARRITO = :carrito AND ID_PRODUCTO = :producto
+    """, {'carrito': id_carrito, 'producto': id_producto})
     existente = cursor.fetchone()
 
     if existente:
@@ -66,21 +84,23 @@ def agregar_a_carrito():
         nuevo_total = nueva_cantidad * valor_unitario
 
         cursor.execute("""
-            UPDATE CARRITO 
-            SET CANTIDAD = :cant, VALOR_TOTAL = :total 
-            WHERE ID_PRODUCTO = :id
+            UPDATE CARRITO_PRODUCTOS 
+            SET CANTIDAD = :cant, VALOR_TOTAL = :total
+            WHERE ID_CARRITO = :carrito AND ID_PRODUCTO = :producto
         """, {
             'cant': nueva_cantidad,
             'total': nuevo_total,
-            'id': id_producto
+            'carrito': id_carrito,
+            'producto': id_producto
         })
         mensaje = 'Producto actualizado en el carrito'
     else:
         cursor.execute("""
-            INSERT INTO CARRITO (ID_PRODUCTO, CANTIDAD, VALOR_UNITARIO, VALOR_TOTAL)
-            VALUES (:id, :cant, :unit, :total)
+            INSERT INTO CARRITO_PRODUCTOS (ID_CARRITO, ID_PRODUCTO, CANTIDAD, VALOR_UNITARIO, VALOR_TOTAL)
+            VALUES (:carrito, :producto, :cant, :unit, :total)
         """, {
-            'id': id_producto,
+            'carrito': id_carrito,
+            'producto': id_producto,
             'cant': cantidad,
             'unit': valor_unitario,
             'total': valor_total
@@ -90,21 +110,35 @@ def agregar_a_carrito():
     connection.commit()
     cursor.close()
 
-    return jsonify({'mensaje': mensaje}), 201
+    return jsonify({'mensaje': mensaje, 'id_carrito': id_carrito}), 201
+
 
 @app.route('/carrito', methods=['GET'])
 def ver_carrito():
+    id_carrito = request.args.get('id_carrito', type=int)
+
+    if not id_carrito:
+        return jsonify({'error': 'Se requiere el ID del carrito'}), 400
+
     cursor = connection.cursor()
+
+    cursor.execute("SELECT 1 FROM CARRITOS WHERE ID_CARRITO = :id", {'id': id_carrito})
+    if not cursor.fetchone():
+        cursor.close()
+        return jsonify({'error': 'El carrito no existe'}), 404
+
     cursor.execute("""
         SELECT 
             p.NOMBRE || ' - ' || p.MARCA AS nombre,
-            c.CANTIDAD,
-            c.VALOR_UNITARIO,
-            c.VALOR_TOTAL
-        FROM CARRITO c
-        JOIN PRODUCTOS p ON c.ID_PRODUCTO = p.ID_PRODUCTO
-        ORDER BY c.ID_CARRITO
-    """)
+            cp.CANTIDAD,
+            cp.VALOR_UNITARIO,
+            cp.VALOR_TOTAL
+        FROM CARRITO_PRODUCTOS cp
+        JOIN PRODUCTOS p ON cp.ID_PRODUCTO = p.ID_PRODUCTO
+        WHERE cp.ID_CARRITO = :carrito
+        ORDER BY p.NOMBRE
+    """, {'carrito': id_carrito})
+
     rows = cursor.fetchall()
     cursor.close()
 
@@ -121,16 +155,10 @@ def ver_carrito():
         total_general += float(row[3])
 
     return jsonify({
-        'carrito': carrito,
+        'carrito_id': id_carrito,
+        'productos': carrito,
         'total_final': total_general
     })
 
-
-
-
-
-
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
-
-
