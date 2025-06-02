@@ -1,50 +1,9 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional, List
-from config import connection
+from app import app
+from config import connection 
+from flask import jsonify, request
 
-app = FastAPI()
-
-# Configuración de CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Modelos Pydantic
-class Sucursal(BaseModel):
-    nombre: str
-    stock: int
-
-class ProductoDetalle(BaseModel):
-    id_producto: int
-    nombre: str
-    marca: str
-    valor: float
-    sucursales: List[Sucursal]
-
-class CarritoItem(BaseModel):
-    id_carrito: Optional[int]
-    id_producto: int
-    cantidad: int
-
-class ProductoCarrito(BaseModel):
-    nombre: str
-    cantidad: int
-    valor_unitario: float
-    valor_total: float
-
-class CarritoResponse(BaseModel):
-    carrito_id: int
-    productos: List[ProductoCarrito]
-    total_final: float
-
-@app.get("/producto/{id_producto}", response_model=ProductoDetalle)
-async def valor_producto(id_producto: int):
+@app.route('/producto/<int:id_producto>', methods=['GET'])
+def valor_producto(id_producto):
     cursor = connection.cursor()
     cursor.execute("""
         SELECT
@@ -63,87 +22,98 @@ async def valor_producto(id_producto: int):
     rows = cursor.fetchall()
     cursor.close()
 
-    if not rows:
-        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    if rows:
+        resultado = {
+            'id_producto': rows[0][0],
+            'nombre': rows[0][1],
+            'marca': rows[0][2],
+            'valor': float(rows[0][3]),
+            'sucursales': [
+                {
+                    'nombre': row[4],
+                    'stock': int(row[5])
+                }
+                for row in rows
+            ]
+        }
+        return jsonify(resultado)
+    else:
+        return jsonify({'error': 'Producto no encontrado'}), 404
 
-    return {
-        'id_producto': rows[0][0],
-        'nombre': rows[0][1],
-        'marca': rows[0][2],
-        'valor': float(rows[0][3]),
-        'sucursales': [
-            {
-                'nombre': row[4],
-                'stock': int(row[5])
-            }
-            for row in rows
-        ]
-    }
+@app.route('/producto_carrito', methods=['POST'])
+def agregar_a_carrito():
+    if not request.is_json:
+        return jsonify({'error': 'Content-Type debe ser application/json'}), 415
 
-@app.post("/producto_carrito")
-async def agregar_a_carrito(item: CarritoItem):
+    data = request.get_json()
+    id_carrito = data.get('id_carrito')
+    id_producto = data.get('id_producto')
+    id_sucursal = data.get('id_sucursal')
+    cantidad = data.get('cantidad')
+
+    if not all([id_producto, id_sucursal, cantidad]):
+        return jsonify({'error': 'Faltan datos obligatorios'}), 400
+
     cursor = connection.cursor()
 
-    if item.id_carrito is None:
-        cursor.execute("INSERT INTO CARRITOS DEFAULT VALUES RETURNING ID_CARRITO INTO :id", 
-                      {'id': cursor.var(int)})
-        item.id_carrito = cursor.getimplicitresults()[0][0]
+    if id_carrito is None:
+        cursor.execute("INSERT INTO CARRITOS DEFAULT VALUES RETURNING ID_CARRITO INTO :id", {'id': cursor.var(int)})
+        id_carrito = cursor.getimplicitresults()[0][0]
     else:
-        cursor.execute("SELECT 1 FROM CARRITOS WHERE ID_CARRITO = :id", 
-                      {'id': item.id_carrito})
+        cursor.execute("SELECT 1 FROM CARRITOS WHERE ID_CARRITO = :id", {'id': id_carrito})
         if not cursor.fetchone():
-            cursor.execute("INSERT INTO CARRITOS (ID_CARRITO) VALUES (:id)", 
-                         {'id': item.id_carrito})
+            cursor.execute("INSERT INTO CARRITOS (ID_CARRITO) VALUES (:id)", {'id': id_carrito})
 
     cursor.execute("""
-        SELECT P.PRECIO_UNITARIO, I.STOCK 
-        FROM PRODUCTOS P 
+        SELECT P.PRECIO_UNITARIO, I.STOCK FROM PRODUCTOS P 
         JOIN INVENTARIO I ON P.ID_PRODUCTO = I.ID_PRODUCTO 
-        WHERE P.ID_PRODUCTO = :id""", 
-        {'id': item.id_producto})
+        WHERE P.ID_PRODUCTO = :id_producto AND I.ID_SUCURSAL = :id_sucursal
+    """, {'id_producto': id_producto, 'id_sucursal': id_sucursal})
     producto = cursor.fetchone()
 
     if not producto:
         cursor.close()
-        raise HTTPException(status_code=404, detail="Producto no encontrado")
+        return jsonify({'error': 'Producto no encontrado en la sucursal especificada'}), 404
 
     stock = producto[1]
-    if item.cantidad >= stock:
+    if cantidad > stock:
         cursor.close()
-        raise HTTPException(status_code=400, detail="Cantidad no disponible en stock")
+        return jsonify({'error': 'Cantidad no disponible en stock'}), 400
 
     valor_unitario = float(producto[0])
-    valor_total = valor_unitario * item.cantidad
+    valor_total = valor_unitario * cantidad
 
     cursor.execute("""
         SELECT CANTIDAD FROM CARRITO_PRODUCTOS 
         WHERE ID_CARRITO = :carrito AND ID_PRODUCTO = :producto
-    """, {'carrito': item.id_carrito, 'producto': item.id_producto})
+    """, {'carrito': id_carrito, 'producto': id_producto})
     existente = cursor.fetchone()
 
     if existente:
-        nueva_cantidad = existente[0] + item.cantidad
+        nueva_cantidad = existente[0] + cantidad
         nuevo_total = nueva_cantidad * valor_unitario
 
         cursor.execute("""
             UPDATE CARRITO_PRODUCTOS 
-            SET CANTIDAD = :cant, VALOR_TOTAL = :total
+            SET CANTIDAD = :cant, VALOR_TOTAL = :total, ID_SUCURSAL = :sucursal
             WHERE ID_CARRITO = :carrito AND ID_PRODUCTO = :producto
         """, {
             'cant': nueva_cantidad,
             'total': nuevo_total,
-            'carrito': item.id_carrito,
-            'producto': item.id_producto
+            'sucursal': id_sucursal,
+            'carrito': id_carrito,
+            'producto': id_producto
         })
         mensaje = 'Producto actualizado en el carrito'
     else:
         cursor.execute("""
-            INSERT INTO CARRITO_PRODUCTOS (ID_CARRITO, ID_PRODUCTO, CANTIDAD, VALOR_UNITARIO, VALOR_TOTAL)
-            VALUES (:carrito, :producto, :cant, :unit, :total)
+            INSERT INTO CARRITO_PRODUCTOS (ID_CARRITO, ID_PRODUCTO, ID_SUCURSAL, CANTIDAD, VALOR_UNITARIO, VALOR_TOTAL)
+            VALUES (:carrito, :producto, :sucursal, :cant, :unit, :total)
         """, {
-            'carrito': item.id_carrito,
-            'producto': item.id_producto,
-            'cant': item.cantidad,
+            'carrito': id_carrito,
+            'producto': id_producto,
+            'sucursal': id_sucursal,
+            'cant': cantidad,
             'unit': valor_unitario,
             'total': valor_total
         })
@@ -152,16 +122,18 @@ async def agregar_a_carrito(item: CarritoItem):
     connection.commit()
     cursor.close()
 
-    return {"mensaje": mensaje, "id_carrito": item.id_carrito}
+    return jsonify({'mensaje': mensaje, 'id_carrito': id_carrito}), 201
 
-@app.get("/carrito/{id_carrito}", response_model=CarritoResponse)
-async def ver_carrito(id_carrito: int):
+
+
+@app.route('/carrito/<int:id_carrito>', methods=['GET'])
+def ver_carrito(id_carrito):
     cursor = connection.cursor()
 
     cursor.execute("SELECT 1 FROM CARRITOS WHERE ID_CARRITO = :id", {'id': id_carrito})
     if not cursor.fetchone():
         cursor.close()
-        raise HTTPException(status_code=404, detail="El carrito no existe")
+        return jsonify({'error': 'El carrito no existe'}), 404
 
     cursor.execute("""
         SELECT 
@@ -178,25 +150,93 @@ async def ver_carrito(id_carrito: int):
     rows = cursor.fetchall()
     cursor.close()
 
-    productos = []
+    carrito = []
     total_general = 0
 
     for row in rows:
-        producto = {
+        carrito.append({
             'nombre': row[0],
             'cantidad': row[1],
             'valor_unitario': float(row[2]),
             'valor_total': float(row[3])
-        }
-        productos.append(producto)
+        })
         total_general += float(row[3])
 
-    return {
+    return jsonify({
         'carrito_id': id_carrito,
-        'productos': productos,
+        'productos': carrito,
         'total_final': total_general
-    }
+    })
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+@app.route('/detalle_pedido', methods=['POST'])
+def crear_detalle_pedido():
+    if not request.is_json:
+        return jsonify({'error': 'Content-Type debe ser application/json'}), 415
+
+    data = request.get_json()
+    id_detalle = data.get('id_detalle')
+    id_carrito = data.get('id_carrito')
+    id_usuario = data.get('id_usuario')
+
+    if not all([id_detalle, id_carrito, id_usuario]):
+        return jsonify({'error': 'Faltan datos obligatorios'}), 400
+
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT 1 FROM CARRITOS WHERE ID_CARRITO = :id", {'id': id_carrito})
+    if not cursor.fetchone():
+        cursor.close()
+        return jsonify({'error': 'Carrito no encontrado'}), 404
+
+    cursor.execute("SELECT DIRECCION FROM USUARIOS WHERE ID_USUARIO = :id", {'id': id_usuario})
+    usuario = cursor.fetchone()
+
+    if not usuario:
+        cursor.close()
+        return jsonify({'error': 'Usuario no encontrado'}), 404
+
+    direccion = usuario[0]
+
+    cursor.execute("""
+        INSERT INTO DETALLE_PEDIDO (ID_DETALLE, ID_CARRITO, DIRECCION)
+        VALUES (:id_detalle, :id_carrito, :direccion)
+    """, {
+        'id_detalle': id_detalle,
+        'id_carrito': id_carrito,
+        'direccion': direccion
+    })
+
+    cursor.execute("""
+        SELECT ID_PRODUCTO, CANTIDAD, ID_SUCURSAL
+        FROM CARRITO_PRODUCTOS
+        WHERE ID_CARRITO = :id_carrito
+    """, {'id_carrito': id_carrito})
+
+    productos = cursor.fetchall()
+
+    for producto in productos:
+        id_producto, cantidad, id_sucursal = producto
+
+        cursor.execute("""
+            UPDATE INVENTARIO
+            SET STOCK = STOCK - :cantidad
+            WHERE ID_PRODUCTO = :id_producto AND ID_SUCURSAL = :id_sucursal
+        """, {
+            'cantidad': cantidad,
+            'id_producto': id_producto,
+            'id_sucursal': id_sucursal
+        })
+
+    connection.commit()
+    cursor.close()
+
+    return jsonify({
+        'mensaje': 'Detalle de pedido creado exitosamente y stock actualizado',
+        'id_detalle': id_detalle,
+        'id_carrito': id_carrito,
+        'direccion': direccion,
+        'estado': 'PENDIENTE'
+    }), 201
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
