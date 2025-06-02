@@ -26,7 +26,7 @@ const HomePage: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
           <div className="text-center">
             <h1 className="text-4xl md:text-6xl font-bold mb-6">
-              Bienvenido a TiendaOnline
+              Bienvenido a Autoparts
             </h1>
             <p className="text-xl md:text-2xl mb-8 text-blue-100">
               Encuentra los mejores productos al mejor precio
@@ -48,7 +48,7 @@ const HomePage: React.FC = () => {
               <ShoppingBagIcon />
             </div>
             <h3 className="text-xl font-semibold mb-2">Envío Gratis</h3>
-            <p className="text-gray-600">En compras mayores a $50</p>
+            <p className="text-gray-600">En compras mayores a $50000</p>
           </div>
           <div className="text-center p-6 bg-white rounded-lg shadow-md">
             <div className="bg-green-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-green-600">
