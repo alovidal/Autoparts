@@ -168,7 +168,7 @@ def ver_carrito(id_carrito):
         'total_final': total_general
     })
 
-@app.route('/detalle_pedido', methods=['POST'])
+@app.route('/detalle_pedido', methods=['POST']) 
 def crear_detalle_pedido():
     if not request.is_json:
         return jsonify({'error': 'Content-Type debe ser application/json'}), 415
@@ -176,35 +176,36 @@ def crear_detalle_pedido():
     data = request.get_json()
     id_detalle = data.get('id_detalle')
     id_carrito = data.get('id_carrito')
-    id_usuario = data.get('id_usuario')
+    id_usuario = data.get('id_usuario')  
+    direccion = data.get('direccion')  
 
-    if not all([id_detalle, id_carrito, id_usuario]):
+    if not all([id_detalle, id_carrito, id_usuario, direccion]): 
         return jsonify({'error': 'Faltan datos obligatorios'}), 400
 
     cursor = connection.cursor()
+
 
     cursor.execute("SELECT 1 FROM CARRITOS WHERE ID_CARRITO = :id", {'id': id_carrito})
     if not cursor.fetchone():
         cursor.close()
         return jsonify({'error': 'Carrito no encontrado'}), 404
 
-    cursor.execute("SELECT DIRECCION FROM USUARIOS WHERE ID_USUARIO = :id", {'id': id_usuario})
-    usuario = cursor.fetchone()
-
-    if not usuario:
+    cursor.execute("SELECT 1 FROM USUARIOS WHERE ID_USUARIO = :id", {'id': id_usuario})
+    if not cursor.fetchone():
         cursor.close()
         return jsonify({'error': 'Usuario no encontrado'}), 404
 
-    direccion = usuario[0]
-
     cursor.execute("""
-        INSERT INTO DETALLE_PEDIDO (ID_DETALLE, ID_CARRITO, DIRECCION)
-        VALUES (:id_detalle, :id_carrito, :direccion)
+        INSERT INTO DETALLE_PEDIDO (ID_DETALLE, ID_CARRITO, DIRECCION, ID_USUARIO)
+        VALUES (:id_detalle, :id_carrito, :direccion, :id_usuario)
     """, {
         'id_detalle': id_detalle,
         'id_carrito': id_carrito,
-        'direccion': direccion
+        'direccion': direccion,
+        'id_usuario': id_usuario
     })
+
+
 
     cursor.execute("""
         SELECT ID_PRODUCTO, CANTIDAD, ID_SUCURSAL
@@ -236,6 +237,104 @@ def crear_detalle_pedido():
         'id_carrito': id_carrito,
         'direccion': direccion,
         'estado': 'PENDIENTE'
+    }), 201
+
+@app.route('/detalle_pedido/<int:id_detalle>', methods=['GET'])
+def ver_detalle_pedido(id_detalle):
+    cursor = connection.cursor()
+    cursor.execute("""
+        SELECT dp.ID_DETALLE, dp.ID_CARRITO, dp.DIRECCION, dp.ESTADO,
+               dp.ID_USUARIO, u.NOMBRE_COMPLETO,
+               p.NOMBRE || ' - ' || p.MARCA AS nombre_producto,
+               cp.CANTIDAD, cp.VALOR_UNITARIO, cp.VALOR_TOTAL
+        FROM DETALLE_PEDIDO dp
+        JOIN CARRITOS c ON dp.ID_CARRITO = c.ID_CARRITO
+        JOIN CARRITO_PRODUCTOS cp ON c.ID_CARRITO = cp.ID_CARRITO
+        JOIN PRODUCTOS p ON cp.ID_PRODUCTO = p.ID_PRODUCTO
+        JOIN USUARIOS u ON dp.ID_USUARIO = u.ID_USUARIO  -- Relación directa entre detalle de pedido y usuario
+        WHERE dp.ID_DETALLE = :id_detalle
+    """, {'id_detalle': id_detalle})
+
+    rows = cursor.fetchall()
+    cursor.close()
+
+    if not rows:
+        return jsonify({'error': 'Detalle de pedido no encontrado'}), 404
+
+    productos = []
+    for row in rows:
+        productos.append({
+            'nombre': row[6],
+            'cantidad': row[7],
+            'valor_unitario': float(row[8]),
+            'valor_total': float(row[9])
+        })
+
+    return jsonify({
+        'id_detalle': rows[0][0],
+        'id_carrito': rows[0][1],
+        'direccion': rows[0][2],
+        'estado': rows[0][3],
+        'usuario': {
+            'id': rows[0][4],  
+            'nombre': rows[0][5]  
+        },
+        'productos': productos
+    })
+
+@app.route('/confirmar_entrega', methods=['POST'])
+def confirmar_entrega():
+    if not request.is_json:
+        return jsonify({'error': 'Content-Type debe ser application/json'}), 415
+
+    data = request.get_json()
+    id_detalle = data.get('id_detalle')
+
+    if not id_detalle:
+        return jsonify({'error': 'Faltan datos obligatorios'}), 400
+
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT ID_CARRITO, ID_USUARIO FROM DETALLE_PEDIDO WHERE ID_DETALLE = :id", {'id': id_detalle})
+    result = cursor.fetchone()
+
+    if not result:
+        cursor.close()
+        return jsonify({'error': 'Detalle de pedido no encontrado'}), 404
+
+    id_carrito, id_usuario = result
+
+    cursor.execute("SELECT 1 FROM PEDIDOS WHERE ID_DETALLE = :id_detalle", {'id_detalle': id_detalle})
+    if cursor.fetchone():
+        cursor.close()
+        return jsonify({'error': 'Este pedido ya ha sido registrado'}), 400
+    id_pedido = id_detalle  
+
+    cursor.execute("""
+        INSERT INTO PEDIDOS (ID_USUARIO, ID_DETALLE, FECHA_PEDIDO)
+        VALUES (:usuario, :detalle, SYSDATE)
+    """, {
+        'usuario': id_usuario,
+        'detalle': id_detalle
+    })
+
+
+
+    cursor.execute("""
+        UPDATE DETALLE_PEDIDO
+        SET ESTADO = 'ENTREGADO'
+        WHERE ID_DETALLE = :id_detalle
+    """, {'id_detalle': id_detalle})
+
+    connection.commit()
+    cursor.close()
+
+    return jsonify({
+        'mensaje': 'Entrega confirmada y pedido registrado',
+        'id_pedido': id_pedido,  
+        'id_usuario': id_usuario,
+        'id_detalle': id_detalle,
+        'estado': 'ENTREGADO'
     }), 201
 
 if __name__ == '__main__':
