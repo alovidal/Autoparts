@@ -1,91 +1,217 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { apiService } from '../services/api';
+import { Slider } from '@mui/material';
+import type { Producto } from '../types/api';
+import { useNavigate } from 'react-router-dom';
 
-export interface Product {
-  id_producto: number;
-  nombre: string;
-  marca: string;
-  categoria: string;
-  precio_unitario: number;
-  stock_actual?: number;
-  alerta?: string;
-  imagen?: string;
+interface CatalogoPageProps {
+    searchTerm?: string;
 }
 
-const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
+const ProductCard: React.FC<{ product: Producto }> = React.memo(({ product }) => {
+  const navigate = useNavigate();
+  const [agregandoAlCarrito, setAgregandoAlCarrito] = useState(false);
+  const [errorCarrito, setErrorCarrito] = useState<string | null>(null);
+  
+  const handleImageError = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
+    e.currentTarget.src = "/img/productos/default.jpg";
+  }, []);
+
+  const handleAgregarAlCarrito = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    setAgregandoAlCarrito(true);
+    setErrorCarrito(null);
+
+    try {
+      console.log('Intentando agregar al carrito:', product.id_producto);
+      const response = await apiService.agregarAlCarrito({
+        producto_id: product.id_producto,
+        cantidad: 1
+      });
+      
+      console.log('Respuesta al agregar al carrito:', response);
+      if (response.status === 'success') {
+        // Mostrar notificación de éxito usando un toast o alert más elegante
+        alert('¡Producto agregado al carrito exitosamente!');
+      } else {
+        throw new Error(response.mensaje || 'Error al agregar al carrito');
+      }
+    } catch (err) {
+      console.error('Error al agregar al carrito:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Error al agregar al carrito';
+      setErrorCarrito(errorMessage);
+      // Mostrar el error en un toast o alert más elegante
+      alert(`Error: ${errorMessage}`);
+    } finally {
+      setAgregandoAlCarrito(false);
+    }
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300">
       <div className="p-4">
-        {product.imagen && (
+        {product.imagen_url && (
           <img
-            src={`img/productos/${product.imagen}`}
+            src={product.imagen_url}
             alt={product.nombre}
             className="w-full h-48 object-contain mb-4"
-            onError={(e) => {
-              e.currentTarget.src = "/img/productos/default.jpg";
-            }}
+            onError={handleImageError}
           />
         )}        
         <h3 className="text-lg font-semibold text-gray-900 mb-2">{product.nombre}</h3>
         <div className="text-gray-600 text-sm mb-2">
           <p>Marca: {product.marca}</p>
           <span className="bg-gray-100 text-gray-800 text-xs px-2 py-1 rounded-full">
-            {product.categoria}
+            {product.categoria_nombre}
           </span>
-          <p className="text-gray-600 text-sm">Precio: ${product.precio_unitario}</p>
+          <p className="text-gray-600 text-sm">Precio: ${product.precio_unitario.toLocaleString()}</p>
         </div>
-        <button className="w-full mt-4 bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition-colors">
-          Ver detalles
+        <div className="flex flex-col space-y-2">
+          <button 
+            onClick={() => navigate(`/producto/${product.id_producto}`, { state: { producto: product } })}
+            className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition-colors"
+          >
+            Ver detalles
+          </button>
+          <button
+            onClick={handleAgregarAlCarrito}
+            disabled={agregandoAlCarrito}
+            className={`w-full ${
+              agregandoAlCarrito 
+                ? 'bg-gray-400 cursor-not-allowed' 
+                : errorCarrito 
+                  ? 'bg-red-600 hover:bg-red-700' 
+                  : 'bg-green-600 hover:bg-green-700'
+            } text-white py-2 px-4 rounded-md transition-colors`}
+          >
+            {agregandoAlCarrito 
+              ? 'Agregando...' 
+              : errorCarrito 
+                ? 'Reintentar' 
+                : 'Agregar al carrito'
+            }
+          </button>
+          {errorCarrito && (
+            <p className="text-red-600 text-xs mt-1 text-center">
+              Error al agregar al carrito. Por favor, intente de nuevo.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+ProductCard.displayName = 'ProductCard';
+
+const CatalogoPage: React.FC<CatalogoPageProps> = ({ searchTerm: initialSearchTerm = '' }) => {
+  const [products, setProducts] = useState<Producto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState(initialSearchTerm);
+  const [selectedCategory, setSelectedCategory] = useState('todas');
+  const [priceRange, setPriceRange] = useState<[number, number]>([0, 100000]);
+  const [maxPossiblePrice, setMaxPossiblePrice] = useState(100000);
+
+  // Actualizar searchTerm cuando cambia initialSearchTerm
+  useEffect(() => {
+    setSearchTerm(initialSearchTerm);
+  }, [initialSearchTerm]);
+
+  const fetchProducts = useCallback(async () => {
+    try {
+      console.log('Fetching products...');
+      const data = await apiService.getProductos();
+      console.log('Raw API response:', data);
+
+      if (data.status === 'success' && Array.isArray(data.productos)) {
+        console.log('Setting products:', data.productos);
+        setProducts(data.productos);
+        
+        if (data.productos.length > 0) {
+          const maxPrice = Math.max(...data.productos.map(p => p.precio_unitario));
+          console.log('Setting max price:', maxPrice);
+          setMaxPossiblePrice(maxPrice);
+          setPriceRange([0, maxPrice]);
+        }
+      } else {
+        console.error('Invalid products data:', data);
+        throw new Error(data.message || 'Error al cargar productos: formato de datos inválido');
+      }
+    } catch (err) {
+      console.error('Error fetching products:', err);
+      setError(err instanceof Error ? err.message : 'Error al cargar productos');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
+
+  const handlePriceRangeChange = useCallback((event: Event, newValue: number | number[]) => {
+    setPriceRange(newValue as [number, number]);
+  }, []);
+
+  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(e.target.value);
+  }, []);
+
+  const handleCategoryChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedCategory(e.target.value);
+  }, []);
+
+  // Memoizar las categorías
+  const categorias = useMemo(() => 
+    ['todas', ...Array.from(new Set(products.map(p => p.categoria_nombre)))],
+    [products]
+  );
+
+  // Memoizar los productos filtrados
+  const filteredProducts = useMemo(() => {
+    console.log('Filtering products:', { products, searchTerm, selectedCategory, priceRange });
+    const filtered = products.filter(product => {
+      const matchesSearch =
+        product.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        product.marca.toLowerCase().includes(searchTerm.toLowerCase());
+
+      const matchesCategory = selectedCategory === 'todas' || product.categoria_nombre === selectedCategory;
+
+      const [minPrice, maxPrice] = priceRange;
+      const matchesPrice = 
+        product.precio_unitario >= minPrice && 
+        product.precio_unitario <= maxPrice;
+
+      return matchesSearch && matchesCategory && matchesPrice;
+    });
+    console.log('Filtered products:', filtered);
+    return filtered;
+  }, [products, searchTerm, selectedCategory, priceRange]);
+
+  if (loading) return (
+    <div className="flex justify-center items-center min-h-screen">
+      <div className="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-blue-500"></div>
+    </div>
+  );
+
+  if (error) return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="text-center p-8 bg-red-50 rounded-lg">
+        <div className="text-red-600 text-xl mb-4">⚠️</div>
+        <h3 className="text-xl font-semibold mb-2 text-red-700">Error</h3>
+        <p className="text-red-600">{error}</p>
+        <button 
+          onClick={fetchProducts}
+          className="mt-4 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+        >
+          Reintentar
         </button>
       </div>
     </div>
   );
-};
-
-const CatalogoPage: React.FC = () => {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('todas');
-  const [priceRange, setPriceRange] = useState('todas');
-
-  useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        const data = await apiService.getInternalData('/productos');
-        setProducts(data);
-        setLoading(false);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Error al cargar productos');
-        setLoading(false);
-      }
-    };
-
-    fetchProducts();
-  }, []);
-
-  // Generar categorías automáticamente
-  const categorias = ['todas', ...Array.from(new Set(products.map(p => p.categoria)))];
-
-  const filteredProducts = products.filter(product => {
-    const matchesSearch =
-      product.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.marca.toLowerCase().includes(searchTerm.toLowerCase());
-
-    const matchesCategory = selectedCategory === 'todas' || product.categoria === selectedCategory;
-
-    let matchesPrice = true;
-    const precio = product.precio_unitario;
-    if (priceRange === 'bajo') matchesPrice = precio <= 10000;
-    else if (priceRange === 'medio') matchesPrice = precio > 10000 && precio <= 30000;
-    else if (priceRange === 'alto') matchesPrice = precio > 30000;
-
-    return matchesSearch && matchesCategory && matchesPrice;
-  });
-
-  if (loading) return <div className="text-center p-8">Cargando productos...</div>;
-  if (error) return <div className="text-center p-8 text-red-600">Error: {error}</div>;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -118,7 +244,7 @@ const CatalogoPage: React.FC = () => {
                     placeholder="¿Qué necesitas?"
                     className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition duration-300"
                     value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onChange={handleSearchChange}
                   />
                   <svg className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -132,7 +258,7 @@ const CatalogoPage: React.FC = () => {
                 <select
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition duration-300"
                   value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  onChange={handleCategoryChange}
                 >
                   {categorias.map(categoria => (
                     <option key={categoria} value={categoria}>
@@ -145,16 +271,31 @@ const CatalogoPage: React.FC = () => {
               {/* Rango de Precios */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Rango de Precios</label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition duration-300"
-                  value={priceRange}
-                  onChange={(e) => setPriceRange(e.target.value)}
-                >
-                  <option value="todas">Todos los precios</option>
-                  <option value="bajo">Hasta $10.000</option>
-                  <option value="medio">$10.000 - $30.000</option>
-                  <option value="alto">Más de $30.000</option>
-                </select>
+                <div className="px-2 pt-1">
+                  <Slider
+                    value={priceRange}
+                    onChange={handlePriceRangeChange}
+                    valueLabelDisplay="auto"
+                    min={0}
+                    max={maxPossiblePrice}
+                    sx={{
+                      color: '#4F46E5',
+                      '& .MuiSlider-thumb': {
+                        backgroundColor: '#4F46E5',
+                      },
+                      '& .MuiSlider-track': {
+                        backgroundColor: '#4F46E5',
+                      },
+                      '& .MuiSlider-rail': {
+                        backgroundColor: '#E5E7EB',
+                      },
+                    }}
+                  />
+                  <div className="flex justify-between text-sm text-gray-600 mt-2">
+                    <span>${priceRange[0].toLocaleString()}</span>
+                    <span>${priceRange[1].toLocaleString()}</span>
+                  </div>
+                </div>
               </div>
 
               {/* Stats */}
