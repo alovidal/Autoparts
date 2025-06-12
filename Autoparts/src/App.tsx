@@ -1,31 +1,39 @@
-import React from 'react';
+import * as React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import Login from './pages/Login';
-import Register from './pages/Register';
+import Register from './pages/register';
 import UserList from './pages/UserList';
-import { AuthProvider, useAuth } from './context/AuthContext';
-import Navbar from './components/Navbar';
-import { UserRole } from './types/auth';
-import ProtectedRoute from './components/ProtectedRoute';
 import HomePage from './pages/home';
 import CatalogoPage from './pages/catalogo';
 import DetalleProducto from './pages/detalleProducto';
+import PerfilPage from './pages/perfil';
+import ConfiguracionPage from './pages/configuracion';
 import AdminUsuariosPage from './pages/admin/usuarios';
 import BodegaProductosPage from './pages/bodega/productos';
 import BodegaPedidosPage from './pages/bodega/pedidos';
 import DistribuidorPedidosPage from './pages/distribuidor/pedidos';
-import PerfilPage from './pages/perfil';
-import ConfiguracionPage from './pages/configuracion';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import Navbar from './components/Navbar';
+import Footer from './components/footer';
+import ProtectedRoute from './components/ProtectedRoute';
+import { UserRole } from './types/auth';
 
-const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const { user } = useAuth();
-    return user ? (
-        <>
+const PublicLayout: React.FC<{ children: React.ReactNode }> = ({ children }: { children: React.ReactNode }) => {
+    return (
+        <div className="min-h-screen bg-gray-50">
             <Navbar />
             {children}
-        </>
-    ) : (
-        <Navigate to="/login" />
+            <Footer />
+        </div>
+    );
+};
+
+const PrivateLayout: React.FC<{ children: React.ReactNode }> = ({ children }: { children: React.ReactNode }) => {
+    return (
+        <div className="min-h-screen bg-gray-50">
+            <Navbar />
+            <main>{children}</main>
+            <Footer />
+        </div>
     );
 };
 
@@ -33,21 +41,124 @@ const App: React.FC = () => {
     return (
         <AuthProvider>
             <Router>
-                <div className="min-h-screen bg-gray-100">
-                    <Routes>
-                        <Route path="/login" element={<Login />} />
-                        <Route path="/register" element={<Register />} />
-                        <Route
-                            path="/users"
-                            element={
-                                <PrivateRoute>
+                <Routes>
+                    {/* Rutas públicas */}
+                    <Route 
+                        path="/register" 
+                        element={
+                            <PublicLayout>
+                                <Register />
+                            </PublicLayout>
+                        } 
+                    />
+
+                    {/* Rutas públicas con navbar */}
+                    <Route 
+                        path="/" 
+                        element={
+                            <PublicLayout>
+                                <HomePage />
+                            </PublicLayout>
+                        } 
+                    />
+                    <Route 
+                        path="/catalogo" 
+                        element={
+                            <PublicLayout>
+                                <CatalogoPage />
+                            </PublicLayout>
+                        } 
+                    />
+                    <Route 
+                        path="/producto/:id" 
+                        element={
+                            <PublicLayout>
+                                <DetalleProducto />
+                            </PublicLayout>
+                        } 
+                    />
+
+                    {/* Rutas protegidas */}
+                    <Route 
+                        path="/perfil" 
+                        element={
+                            <ProtectedRoute>
+                                <PrivateLayout>
+                                    <PerfilPage />
+                                </PrivateLayout>
+                            </ProtectedRoute>
+                        } 
+                    />
+                    <Route 
+                        path="/configuracion" 
+                        element={
+                            <ProtectedRoute>
+                                <PrivateLayout>
+                                    <ConfiguracionPage />
+                                </PrivateLayout>
+                            </ProtectedRoute>
+                        } 
+                    />
+                    <Route 
+                        path="/users" 
+                        element={
+                            <ProtectedRoute roles={[UserRole.ADMIN]}>
+                                <PrivateLayout>
                                     <UserList />
-                                </PrivateRoute>
-                            }
-                        />
-                        <Route path="/" element={<Navigate to="/users" />} />
-                    </Routes>
-                </div>
+                                </PrivateLayout>
+                            </ProtectedRoute>
+                        } 
+                    />
+
+                    {/* Rutas de Admin */}
+                    <Route 
+                        path="/admin/usuarios" 
+                        element={
+                            <ProtectedRoute roles={[UserRole.ADMIN]}>
+                                <PrivateLayout>
+                                    <AdminUsuariosPage />
+                                </PrivateLayout>
+                            </ProtectedRoute>
+                        } 
+                    />
+
+                    {/* Rutas de Bodeguero */}
+                    <Route 
+                        path="/bodega/productos" 
+                        element={
+                            <ProtectedRoute roles={[UserRole.BODEGUERO, UserRole.ADMIN]}>
+                                <PrivateLayout>
+                                    <BodegaProductosPage />
+                                </PrivateLayout>
+                            </ProtectedRoute>
+                        } 
+                    />
+                    <Route 
+                        path="/bodega/pedidos" 
+                        element={
+                            <ProtectedRoute roles={[UserRole.BODEGUERO, UserRole.ADMIN]}>
+                                <PrivateLayout>
+                                    <BodegaPedidosPage />
+                                </PrivateLayout>
+                            </ProtectedRoute>
+                        } 
+                    />
+
+                    {/* Rutas de Distribuidor */}
+                    <Route 
+                        path="/distribuidor/pedidos" 
+                        element={
+                            <ProtectedRoute roles={[UserRole.DISTRIBUIDOR, UserRole.ADMIN]}>
+                                <PrivateLayout>
+                                    <DistribuidorPedidosPage />
+                                </PrivateLayout>
+                            </ProtectedRoute>
+                        } 
+                    />
+
+                    {/* Ruta por defecto */}
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
             </Router>
         </AuthProvider>
     );

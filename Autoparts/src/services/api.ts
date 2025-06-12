@@ -15,7 +15,7 @@ import type {
 } from '../types/api';
 
 const api = axios.create({
-    baseURL: API_CONFIG.INTERNAL_API_URL,
+    baseURL: `${API_CONFIG.INTERNAL_API_URL}/api`,
     timeout: API_CONFIG.TIMEOUT
 });
 
@@ -51,48 +51,24 @@ class ApiService {
         }
     }
 
-    // Métodos para la API Interna
-    async getInternalData(endpoint: string) {
-        return this.fetchWithError(`${API_CONFIG.INTERNAL_API_URL}${endpoint}`);
-    }
-
-    async postInternalData(endpoint: string, data: any) {
-        return this.fetchWithError(`${API_CONFIG.INTERNAL_API_URL}${endpoint}`, {
-            method: 'POST',
-            body: JSON.stringify(data),
-        });
-    }
-
-    // Métodos para la API Externa
-    async getExternalData(endpoint: string) {
-        return this.fetchWithError(`${API_CONFIG.EXTERNAL_API_URL}${endpoint}`);
-    }
-
-    async postExternalData(endpoint: string, data: any) {
-        return this.fetchWithError(`${API_CONFIG.EXTERNAL_API_URL}${endpoint}`, {
-            method: 'POST',
-            body: JSON.stringify(data),
-        });
-    }
-
     // API Interna - Productos
     async getProductos(): Promise<ProductoResponse> {
         try {
-            console.log('Calling API endpoint:', `${API_CONFIG.INTERNAL_API_URL}/productos`);
+            console.log('Calling API endpoint:', `${API_CONFIG.INTERNAL_API_URL}/api/productos`);
             const response = await api.get('/productos');
             console.log('Raw backend response:', response.data);
             
             // Transformar la respuesta para que coincida con la interfaz esperada
             const productos = response.data.map((item: any) => ({
                 id_producto: item.id_producto,
-                codigo_fabricante: '', // Campo no presente en el backend
+                codigo_fabricante: item.codigo_fabricante || '',
                 marca: item.marca,
-                codigo_interno: '', // Campo no presente en el backend
+                codigo_interno: item.codigo_interno || '',
                 nombre: item.nombre,
-                descripcion: '', // Campo no presente en el backend
+                descripcion: item.descripcion || '',
                 precio_unitario: item.precio_unitario || 0,
-                stock_min: 0, // Campo no presente en el backend
-                id_categoria: 0, // Campo no presente en el backend
+                stock_min: item.stock_min || 0,
+                id_categoria: item.id_categoria || 0,
                 imagen_url: item.imagen || 'https://via.placeholder.com/200',
                 categoria_nombre: item.categoria || 'Sin categoría'
             }));
@@ -116,18 +92,13 @@ class ApiService {
     async getProducto(id: number): Promise<ProductoResponse> {
         try {
             console.log('Obteniendo producto con ID:', id);
-            const response = await fetch(`${API_CONFIG.INTERNAL_API_URL}/productos/${id}`);
-            
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || `Error HTTP: ${response.status}`);
-            }
+            const response = await api.get(`/productos/${id}`);
+            const data = response.data;
 
-            const data = await response.json();
             console.log('Respuesta del servidor para producto:', data);
 
             // Si la respuesta es un objeto de producto directo
-            if (data && typeof data === 'object' && 'id_producto' in data) {
+            if (data && typeof data === 'object' && ('id_producto' in data || 'id' in data)) {
                 console.log('Respuesta es un objeto producto, formateando...');
                 const formattedData: ProductoResponse = {
                     status: 'success',
@@ -149,33 +120,6 @@ class ApiService {
                 return formattedData;
             }
 
-            // Si la respuesta ya tiene el formato ProductoResponse
-            if (data && typeof data === 'object' && 'status' in data) {
-                console.log('Respuesta ya tiene formato ProductoResponse');
-                if (data.producto) {
-                    data.producto = {
-                        ...data.producto,
-                        id_producto: data.producto.id_producto || data.producto.id || 0,
-                        codigo_fabricante: data.producto.codigo_fabricante || '',
-                        marca: data.producto.marca || '',
-                        codigo_interno: data.producto.codigo_interno || '',
-                        nombre: data.producto.nombre || '',
-                        descripcion: data.producto.descripcion || '',
-                        precio_unitario: parseFloat(data.producto.precio_unitario) || 0,
-                        stock_min: parseInt(data.producto.stock_min) || 0,
-                        id_categoria: parseInt(data.producto.id_categoria) || 0,
-                        imagen_url: data.producto.imagen_url || data.producto.imagen || '',
-                        categoria_nombre: data.producto.categoria_nombre || data.producto.categoria || 'Sin categoría'
-                    };
-                }
-                return data;
-            }
-
-            // Si la respuesta tiene un error de la API
-            if (data && data.detail) {
-                throw new Error(data.detail);
-            }
-
             // Si llegamos aquí, el formato no es reconocido
             console.error('Formato de respuesta no reconocido:', data);
             throw new Error('Formato de respuesta no reconocido');
@@ -189,25 +133,17 @@ class ApiService {
         }
     }
 
-    // API Externa - Productos y Stock
-    async getProductoExterno(id: number): Promise<ProductoExterno> {
-        return this.fetchWithError(`${API_CONFIG.EXTERNAL_API_URL}/producto/${id}`);
-    }
-
-    // API Externa - Carrito
+    // Métodos para carrito (usando API externa cuando esté disponible)
     async getCarrito(id: number): Promise<CarritoResponse> {
         try {
-            const data = await this.fetchWithError(`${API_CONFIG.EXTERNAL_API_URL}/carrito/${id}`);
-            if (!data.status) {
-                return {
-                    status: 'success',
-                    carrito_id: data.carrito_id,
-                    productos: data.productos || [],
-                    total_final: data.total_final || 0,
-                    message: ''
-                };
-            }
-            return data;
+            // Por ahora devolver datos simulados
+            return {
+                status: 'success',
+                carrito_id: id,
+                productos: [],
+                total_final: 0,
+                message: 'Carrito vacío'
+            };
         } catch (error) {
             return {
                 status: 'error',
@@ -221,11 +157,12 @@ class ApiService {
 
     async agregarAlCarrito(data: AgregarCarritoRequest): Promise<AgregarCarritoResponse> {
         try {
-            const response = await api.post('/carrito/agregar', data);
+            // Por ahora simular éxito
+            console.log('Simulando agregar al carrito:', data);
             return {
                 status: 'success',
                 mensaje: 'Producto agregado al carrito exitosamente',
-                id_carrito: response.data.id_carrito
+                id_carrito: Math.floor(Math.random() * 1000)
             };
         } catch (error) {
             console.error('Error al agregar al carrito:', error);
@@ -236,25 +173,37 @@ class ApiService {
         }
     }
 
-    // API Externa - Pedidos
+    // Métodos para pedidos (placeholder)
     async crearDetallePedido(data: DetallePedidoRequest): Promise<DetallePedidoResponse> {
-        return this.fetchWithError(`${API_CONFIG.EXTERNAL_API_URL}/detalle_pedido`, {
-            method: 'POST',
-            body: JSON.stringify(data),
-        });
+        return {
+            status: 'success',
+            id_detalle: data.id_detalle,
+            estado: 'PENDIENTE',
+            fecha: new Date().toISOString(),
+            total: 0,
+            productos: []
+        };
     }
 
     async getDetallePedido(id: number): Promise<DetallePedidoResponse> {
-        return this.fetchWithError(`${API_CONFIG.EXTERNAL_API_URL}/detalle_pedido/${id}`);
+        return {
+            status: 'success',
+            id_detalle: id,
+            estado: 'PENDIENTE',
+            fecha: new Date().toISOString(),
+            total: 0,
+            productos: []
+        };
     }
 
     async confirmarEntrega(idDetalle: number): Promise<{ status: string; mensaje: string }> {
-        return this.fetchWithError(`${API_CONFIG.EXTERNAL_API_URL}/confirmar_entrega`, {
-            method: 'POST',
-            body: JSON.stringify({ id_detalle: idDetalle }),
-        });
+        return {
+            status: 'success',
+            mensaje: 'Entrega confirmada'
+        };
     }
 
+    // Métodos para usuarios
     async getUserProfile(userId: number): Promise<{ status: string; profile?: UserProfile; message?: string }> {
         try {
             const response = await api.get(`/usuarios/${userId}/perfil`);
@@ -344,4 +293,4 @@ class ApiService {
     }
 }
 
-export const apiService = new ApiService(); 
+export const apiService = new ApiService();

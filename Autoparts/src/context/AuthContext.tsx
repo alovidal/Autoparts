@@ -1,11 +1,13 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import type { User, LoginRequest } from '../types/auth';
+import type { User, LoginRequest, RegisterRequest } from '../types/auth';
 import axios from 'axios';
 import { API_CONFIG } from '../config/api';
 
 interface AuthContextType {
     user: User | null;
+    isAuthenticated: boolean;
     login: (data: LoginRequest) => Promise<void>;
+    register: (data: RegisterRequest) => Promise<{ status: string; message?: string }>;
     logout: () => void;
 }
 
@@ -24,6 +26,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const savedUser = localStorage.getItem('user');
         return savedUser ? JSON.parse(savedUser) : null;
     });
+
+    const isAuthenticated = !!user;
 
     useEffect(() => {
         if (user) {
@@ -54,6 +58,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     };
 
+    const register = async (data: RegisterRequest): Promise<{ status: string; message?: string }> => {
+        try {
+            const response = await axios.post(`${API_CONFIG.INTERNAL_API_URL}/api/auth/register`, data, {
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            if (response.data && response.status === 201) {
+                return {
+                    status: 'success',
+                    message: 'Usuario registrado exitosamente'
+                };
+            }
+
+            return {
+                status: 'error',
+                message: 'Error al registrar usuario'
+            };
+        } catch (error) {
+            console.error('Error during registration:', error);
+            if (axios.isAxiosError(error)) {
+                return {
+                    status: 'error',
+                    message: error.response?.data?.detail || 'Error al registrar usuario'
+                };
+            }
+            return {
+                status: 'error',
+                message: 'Error al registrar usuario'
+            };
+        }
+    };
+
     const logout = () => {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
@@ -61,10 +99,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     return (
-        <AuthContext.Provider value={{ user, login, logout }}>
+        <AuthContext.Provider value={{ user, isAuthenticated, login, register, logout }}>
             {children}
         </AuthContext.Provider>
     );
 };
 
-export default AuthContext; 
+export default AuthContext;
