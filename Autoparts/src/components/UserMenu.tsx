@@ -38,10 +38,10 @@ const UserMenu: React.FC<UserMenuProps> = ({ onClose }) => {
             <div className="px-4 py-3">
                 <p className="text-sm">Conectado como</p>
                 <p className="text-sm font-medium text-gray-900 truncate">
-                    {user?.nombre}
+                    {user?.nombre_completo}
                 </p>
                 <p className="text-xs text-gray-500">
-                    {user?.email}
+                    {user?.correo}
                 </p>
             </div>
 
@@ -70,7 +70,7 @@ const UserMenu: React.FC<UserMenuProps> = ({ onClose }) => {
                 </Link>
 
                 {/* Menú específico para roles */}
-                {user?.role === UserRole.ADMIN && (
+                {user?.rol === UserRole.ADMIN && (
                     <>
                         <div className="border-t border-gray-100"></div>
                         <Link
@@ -90,7 +90,7 @@ const UserMenu: React.FC<UserMenuProps> = ({ onClose }) => {
                     </>
                 )}
 
-                {user?.role === UserRole.BODEGUERO && (
+                {user?.rol === UserRole.BODEGUERO && (
                     <>
                         <div className="border-t border-gray-100"></div>
                         <Link
@@ -110,7 +110,7 @@ const UserMenu: React.FC<UserMenuProps> = ({ onClose }) => {
                     </>
                 )}
 
-                {user?.role === UserRole.DISTRIBUIDOR && (
+                {user?.rol === UserRole.DISTRIBUIDOR && (
                     <>
                         <div className="border-t border-gray-100"></div>
                         <Link
@@ -143,4 +143,4 @@ const UserMenu: React.FC<UserMenuProps> = ({ onClose }) => {
     );
 };
 
-export default UserMenu; 
+export default UserMenu;

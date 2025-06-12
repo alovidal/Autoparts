@@ -39,34 +39,61 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const login = async (data: LoginRequest) => {
         try {
+            console.log('Intentando login con:', data);
+            
+            // Usar FormData para el login como espera FastAPI OAuth2PasswordRequestForm
             const formData = new FormData();
             formData.append('username', data.correo);
             formData.append('password', data.contrasena);
 
-            const response = await axios.post(`${API_CONFIG.INTERNAL_API_URL}/api/auth/login`, formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
-            });
+            console.log('Enviando a:', `${API_CONFIG.INTERNAL_API_URL}/api/auth/login`);
+            
+            const response = await axios.post(
+                `${API_CONFIG.INTERNAL_API_URL}/api/auth/login`, 
+                formData,
+                {
+                    headers: {
+                        'Content-Type': 'multipart/form-data',
+                    },
+                }
+            );
 
-            const { access_token, user: userData } = response.data;
-            localStorage.setItem('token', access_token);
-            setUser(userData);
+            console.log('Respuesta del login:', response.data);
+
+            if (response.data.access_token && response.data.user) {
+                localStorage.setItem('token', response.data.access_token);
+                setUser(response.data.user);
+                console.log('Login exitoso, usuario guardado:', response.data.user);
+            } else {
+                throw new Error('Respuesta de login inválida');
+            }
         } catch (error) {
-            console.error('Error during login:', error);
+            console.error('Error durante el login:', error);
+            if (axios.isAxiosError(error)) {
+                console.error('Error response:', error.response?.data);
+                throw new Error(error.response?.data?.detail || 'Error al iniciar sesión');
+            }
             throw error;
         }
     };
 
     const register = async (data: RegisterRequest): Promise<{ status: string; message?: string }> => {
         try {
-            const response = await axios.post(`${API_CONFIG.INTERNAL_API_URL}/api/auth/register`, data, {
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-            });
+            console.log('Intentando registro con:', data);
+            
+            const response = await axios.post(
+                `${API_CONFIG.INTERNAL_API_URL}/api/auth/register`, 
+                data,
+                {
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                }
+            );
 
-            if (response.data && response.status === 201) {
+            console.log('Respuesta del registro:', response.data);
+
+            if (response.status === 200 || response.status === 201) {
                 return {
                     status: 'success',
                     message: 'Usuario registrado exitosamente'
@@ -78,8 +105,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 message: 'Error al registrar usuario'
             };
         } catch (error) {
-            console.error('Error during registration:', error);
+            console.error('Error durante el registro:', error);
             if (axios.isAxiosError(error)) {
+                console.error('Error response:', error.response?.data);
                 return {
                     status: 'error',
                     message: error.response?.data?.detail || 'Error al registrar usuario'
@@ -96,6 +124,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         setUser(null);
+        console.log('Usuario desconectado');
     };
 
     return (

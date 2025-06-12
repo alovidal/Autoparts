@@ -10,7 +10,7 @@ export interface User {
     nombre_completo: string;
     rut: string;
     correo: string;
-    rol: string;
+    rol: UserRole; // Cambiado a UserRole para consistencia
     fecha_registro?: string;
 }
 
@@ -47,7 +47,7 @@ export interface UserProfile {
     id: number;
     nombre: string;
     email: string;
-    role: UserRole;
+    role: string;
     direccion?: string;
     telefono?: string;
     fecha_registro: string;
@@ -55,9 +55,26 @@ export interface UserProfile {
 }
 
 export interface UserUpdateRequest {
-    nombre_completo: string;
-    rut: string;
-    correo: string;
+    id?: number;
+    username?: string;
+    email?: string;
+    role?: UserRole;
+    nombre?: string;
+    apellido?: string;
+    telefono?: string;
+    direccion?: string;
+    rut?: string;
+    razon_social?: string;
+    descuento?: number;
+    nombre_completo?: string;
+    correo?: string;
+}
+
+export interface UserResponse {
+    status: 'success' | 'error';
+    users?: User[];
+    user?: User;
+    message?: string;
 }
 
 export interface PedidoResumen {
@@ -71,4 +88,4 @@ export interface ConfiguracionUsuario {
     notificaciones_email: boolean;
     tema_oscuro: boolean;
     idioma: string;
-} 
+}

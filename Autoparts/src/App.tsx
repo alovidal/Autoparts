@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import LoginPage from './pages/login';
 import Register from './pages/register';
 import UserList from './pages/UserList';
 import HomePage from './pages/home';
@@ -11,7 +12,7 @@ import AdminUsuariosPage from './pages/admin/usuarios';
 import BodegaProductosPage from './pages/bodega/productos';
 import BodegaPedidosPage from './pages/bodega/pedidos';
 import DistribuidorPedidosPage from './pages/distribuidor/pedidos';
-import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthProvider } from './context/AuthContext';
 import Navbar from './components/Navbar';
 import Footer from './components/footer';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -23,6 +24,14 @@ const PublicLayout: React.FC<{ children: React.ReactNode }> = ({ children }: { c
             <Navbar />
             {children}
             <Footer />
+        </div>
+    );
+};
+
+const AuthLayout: React.FC<{ children: React.ReactNode }> = ({ children }: { children: React.ReactNode }) => {
+    return (
+        <div className="min-h-screen bg-gray-50">
+            {children}
         </div>
     );
 };
@@ -42,13 +51,21 @@ const App: React.FC = () => {
         <AuthProvider>
             <Router>
                 <Routes>
-                    {/* Rutas públicas */}
+                    {/* Rutas de autenticación (sin navbar) */}
+                    <Route 
+                        path="/login" 
+                        element={
+                            <AuthLayout>
+                                <LoginPage />
+                            </AuthLayout>
+                        } 
+                    />
                     <Route 
                         path="/register" 
                         element={
-                            <PublicLayout>
+                            <AuthLayout>
                                 <Register />
-                            </PublicLayout>
+                            </AuthLayout>
                         } 
                     />
 
