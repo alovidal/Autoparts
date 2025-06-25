@@ -46,6 +46,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             formData.append('username', data.correo);
             formData.append('password', data.contrasena);
 
+            console.log('Datos del formulario:', formData);
+
             console.log('Enviando a:', `${API_CONFIG.INTERNAL_API_URL}/api/auth/login`);
             
             const response = await axios.post(

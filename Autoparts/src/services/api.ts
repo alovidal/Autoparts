@@ -19,6 +19,13 @@ const api = axios.create({
     timeout: API_CONFIG.TIMEOUT
 });
 
+interface ApiResponse<T> {
+    status: 'success' | 'error';
+    message?: string;
+    productos?: T[];
+    producto?: T;
+}
+
 class ApiService {
     private async fetchWithError(url: string, options: RequestInit = {}) {
         try {
@@ -52,83 +59,42 @@ class ApiService {
     }
 
     // API Interna - Productos
-    async getProductos(): Promise<ProductoResponse> {
+    async getProductos(): Promise<ApiResponse<Producto>> {
         try {
-            console.log('Calling API endpoint:', `${API_CONFIG.INTERNAL_API_URL}/api/productos`);
-            const response = await api.get('/productos');
-            console.log('Raw backend response:', response.data);
-            
-            // Transformar la respuesta para que coincida con la interfaz esperada
-            const productos = response.data.map((item: any) => ({
-                id_producto: item.id_producto,
-                codigo_fabricante: item.codigo_fabricante || '',
-                marca: item.marca,
-                codigo_interno: item.codigo_interno || '',
-                nombre: item.nombre,
-                descripcion: item.descripcion || '',
-                precio_unitario: item.precio_unitario || 0,
-                stock_min: item.stock_min || 0,
-                id_categoria: item.id_categoria || 0,
-                imagen_url: item.imagen || 'https://via.placeholder.com/200',
-                categoria_nombre: item.categoria || 'Sin categoría'
-            }));
-
-            console.log('Transformed products:', productos);
-            
+            const response = await fetch(`${API_CONFIG.INTERNAL_API_URL}/api/productos`);
+            if (!response.ok) {
+                throw new Error('Error al obtener productos');
+            }
+            const data = await response.json();
             return {
                 status: 'success',
-                productos
+                productos: data
             };
         } catch (error) {
-            console.error('Error al obtener productos:', error);
+            console.error('Error en getProductos:', error);
             return {
                 status: 'error',
-                message: 'Error al obtener los productos',
-                productos: []
+                message: error instanceof Error ? error.message : 'Error desconocido'
             };
         }
     }
 
-    async getProducto(id: number): Promise<ProductoResponse> {
+    async getProducto(id: number): Promise<ApiResponse<Producto>> {
         try {
-            console.log('Obteniendo producto con ID:', id);
-            const response = await api.get(`/productos/${id}`);
-            const data = response.data;
-
-            console.log('Respuesta del servidor para producto:', data);
-
-            // Si la respuesta es un objeto de producto directo
-            if (data && typeof data === 'object' && ('id_producto' in data || 'id' in data)) {
-                console.log('Respuesta es un objeto producto, formateando...');
-                const formattedData: ProductoResponse = {
-                    status: 'success',
-                    producto: {
-                        id_producto: data.id_producto || data.id || 0,
-                        codigo_fabricante: data.codigo_fabricante || '',
-                        marca: data.marca || '',
-                        codigo_interno: data.codigo_interno || '',
-                        nombre: data.nombre || '',
-                        descripcion: data.descripcion || '',
-                        precio_unitario: parseFloat(data.precio_unitario) || 0,
-                        stock_min: parseInt(data.stock_min) || 0,
-                        id_categoria: parseInt(data.id_categoria) || 0,
-                        imagen_url: data.imagen_url || data.imagen || '',
-                        categoria_nombre: data.categoria_nombre || data.categoria || 'Sin categoría'
-                    }
-                };
-                console.log('Datos del producto formateados:', formattedData);
-                return formattedData;
+            const response = await fetch(`${API_CONFIG.INTERNAL_API_URL}/api/productos/${id}`);
+            if (!response.ok) {
+                throw new Error('Error al obtener el producto');
             }
-
-            // Si llegamos aquí, el formato no es reconocido
-            console.error('Formato de respuesta no reconocido:', data);
-            throw new Error('Formato de respuesta no reconocido');
-
+            const data = await response.json();
+            return {
+                status: 'success',
+                producto: data
+            };
         } catch (error) {
-            console.error('Error al obtener producto:', error);
+            console.error('Error en getProducto:', error);
             return {
                 status: 'error',
-                message: error instanceof Error ? error.message : 'Error al obtener el producto',
+                message: error instanceof Error ? error.message : 'Error desconocido'
             };
         }
     }

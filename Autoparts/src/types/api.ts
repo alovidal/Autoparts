@@ -1,16 +1,16 @@
 // Tipos para la API Interna
 export interface Producto {
     id_producto: number;
-    codigo_fabricante: string;
-    marca: string;
-    codigo_interno: string;
     nombre: string;
     descripcion: string;
     precio_unitario: number;
-    stock_min: number;
-    id_categoria: number;
     imagen_url: string;
+    stock_actual: number;
+    stock_min?: number;
     categoria_nombre: string;
+    marca: string;
+    codigo_interno?: string;
+    codigo_fabricante?: string;
 }
 
 export interface ProductoResponse {

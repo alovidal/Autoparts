@@ -1,181 +1,76 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React from 'react';
+import { Link } from 'react-router-dom';
+import CartButton from './CartButton';
 import { useAuth } from '../context/AuthContext';
-import UserMenu from './UserMenu';
 
 const Navbar: React.FC = () => {
-    const { user, logout } = useAuth();
-    const navigate = useNavigate();
-    const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-    const handleLogout = () => {
-        logout();
-        navigate('/login');
-    };
+    const { isAuthenticated, user, logout } = useAuth();
 
     return (
         <nav className="bg-white shadow-lg">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex justify-between h-16">
-                    {/* Logo y navegación principal */}
-                    <div className="flex items-center">
+                    <div className="flex">
                         <Link to="/" className="flex-shrink-0 flex items-center">
-                            <span className="text-2xl font-bold text-blue-600">AutoParts</span>
+                            <img
+                                className="h-8 w-auto"
+                                src="/logo.png"
+                                alt="AutoParts"
+                            />
+                            <span className="ml-2 text-xl font-bold text-gray-900">AutoParts</span>
                         </Link>
-                        
-                        {/* Navegación desktop */}
-                        <div className="hidden md:ml-10 md:flex md:space-x-8">
+                        <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
                             <Link
                                 to="/"
-                                className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                                className="text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 border-transparent hover:border-gray-300"
                             >
                                 Inicio
                             </Link>
                             <Link
                                 to="/catalogo"
-                                className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                                className="text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 border-transparent hover:border-gray-300"
                             >
                                 Catálogo
                             </Link>
-                            {user && (
-                                <>
-                                    <Link
-                                        to="/pedidos"
-                                        className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors"
-                                    >
-                                        Mis Pedidos
-                                    </Link>
-                                    {(user.rol === 'ADMIN' || user.rol === 'BODEGUERO') && (
-                                        <Link
-                                            to="/admin"
-                                            className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors"
-                                        >
-                                            Administración
-                                        </Link>
-                                    )}
-                                </>
+                            {isAuthenticated && (
+                                <Link
+                                    to="/mis-pedidos"
+                                    className="text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 border-transparent hover:border-gray-300"
+                                >
+                                    Mis Pedidos
+                                </Link>
                             )}
                         </div>
                     </div>
-
-                    {/* Usuario y carrito */}
-                    <div className="flex items-center space-x-4">
-                        {user ? (
-                            <>
-                                {/* Carrito */}
-                                <button className="text-gray-700 hover:text-blue-600 p-2 rounded-md transition-colors">
-                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4m0 0L7 13m0 0l-1.5 6M7 13l-1.5 6m0 0h9M7 19h9" />
-                                    </svg>
-                                </button>
-
-                                {/* Menú de usuario */}
-                                <div className="relative">
+                    <div className="flex items-center">
+                        <CartButton />
+                        <div className="ml-4">
+                            {isAuthenticated ? (
+                                <div className="flex items-center space-x-4">
+                                    <span className="text-gray-700">
+                                        {user?.nombre || 'Usuario'}
+                                    </span>
                                     <button
-                                        onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                                        className="flex items-center text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                                        onClick={logout}
+                                        className="text-gray-700 hover:text-gray-900"
                                     >
-                                        <div className="flex items-center space-x-2">
-                                            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
-                                                <span className="text-white text-sm font-medium">
-                                                    {user.nombre_completo.charAt(0).toUpperCase()}
-                                                </span>
-                                            </div>
-                                            <span className="hidden md:block">{user.nombre_completo}</span>
-                                            <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                            </svg>
-                                        </div>
+                                        Cerrar sesión
                                     </button>
-
-                                    {isUserMenuOpen && (
-                                        <UserMenu onClose={() => setIsUserMenuOpen(false)} />
-                                    )}
                                 </div>
-                            </>
-                        ) : (
-                            <div className="flex items-center space-x-4">
+                            ) : (
                                 <Link
                                     to="/login"
-                                    className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                                    className="text-gray-700 hover:text-gray-900"
                                 >
-                                    Iniciar Sesión
+                                    Iniciar sesión
                                 </Link>
-                                <Link
-                                    to="/register"
-                                    className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
-                                >
-                                    Registrarse
-                                </Link>
-                            </div>
-                        )}
-
-                        {/* Botón del menú móvil */}
-                        <div className="md:hidden">
-                            <button
-                                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                                className="text-gray-700 hover:text-blue-600 p-2 rounded-md transition-colors"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                                </svg>
-                            </button>
+                            )}
                         </div>
                     </div>
                 </div>
-
-                {/* Menú móvil */}
-                {isMobileMenuOpen && (
-                    <div className="md:hidden">
-                        <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3 border-t border-gray-200">
-                            <Link
-                                to="/"
-                                className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors"
-                                onClick={() => setIsMobileMenuOpen(false)}
-                            >
-                                Inicio
-                            </Link>
-                            <Link
-                                to="/catalogo"
-                                className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors"
-                                onClick={() => setIsMobileMenuOpen(false)}
-                            >
-                                Catálogo
-                            </Link>
-                            {user && (
-                                <>
-                                    <Link
-                                        to="/perfil"
-                                        className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors"
-                                        onClick={() => setIsMobileMenuOpen(false)}
-                                    >
-                                        Mi Perfil
-                                    </Link>
-                                    <Link
-                                        to="/pedidos"
-                                        className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors"
-                                        onClick={() => setIsMobileMenuOpen(false)}
-                                    >
-                                        Mis Pedidos
-                                    </Link>
-                                    <button
-                                        onClick={() => {
-                                            setIsMobileMenuOpen(false);
-                                            handleLogout();
-                                        }}
-                                        className="text-red-600 hover:text-red-700 block px-3 py-2 rounded-md text-base font-medium transition-colors w-full text-left"
-                                    >
-                                        Cerrar Sesión
-                                    </button>
-                                </>
-                            )}
-                        </div>
-                    </div>
-                )}
             </div>
         </nav>
     );
 };
 
-export default Navbar;
+export default Navbar; 

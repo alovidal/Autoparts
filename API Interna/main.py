@@ -1,778 +1,552 @@
-from fastapi import FastAPI, HTTPException, Query, Depends, status, APIRouter
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr
-from typing import Optional, List
+from flask import jsonify, request
+from app import app
 from config import connection
-from datetime import datetime, timedelta
-import jwt
-import bcrypt
-from passlib.context import CryptContext
-from models import User, UserInDB, Token, UserCreate, UserUpdate
-from database import get_db, create_user, verify_password, get_user_by_email, create_access_token, get_user_by_token
 
-app = FastAPI()
-
-# Configuración de CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # URL del frontend
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Configuración de seguridad
-SECRET_KEY = "tu_clave_secreta_aqui"  # Cambia esto en producción
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
-# Crear router para usuarios
-user_router = APIRouter(prefix="/api/usuarios", tags=["usuarios"])
-auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
-
-# Crear router para productos
-product_router = APIRouter(prefix="/api/productos", tags=["productos"])
-
-# Modelos Pydantic
-class UserBase(BaseModel):
-    correo: EmailStr
-    nombre_completo: str
-    rut: str
-    rol: Optional[str] = "CLIENTE"
-
-class UserCreate(UserBase):
-    contrasena: str
-
-class UserUpdate(BaseModel):
-    nombre_completo: Optional[str] = None
-    rut: Optional[str] = None
-    contrasena: Optional[str] = None
-
-class User(UserBase):
-    id_usuario: int
-    fecha_registro: datetime
-
-class StockInput(BaseModel):
-    id_sucursal: int
-    id_producto: int
-    cantidad: int
-
-class ProductoBase(BaseModel):
-    nombre: str
-    marca: str
-    categoria: Optional[str] = None
-    stock_actual: Optional[int] = None
-    precio_unitario: Optional[float] = None
-    imagen: Optional[str] = None
-    alerta: Optional[str] = None
-
-class ProductoResponse(ProductoBase):
-    id_producto: int
-
-class UserProfile(BaseModel):
-    id: int
-    nombre: str
-    email: str
-    role: str
-    direccion: Optional[str] = None
-    telefono: Optional[str] = None
-    fecha_registro: str
-    ultima_compra: Optional[str] = None
-
-class UpdateProfileRequest(BaseModel):
-    nombre: Optional[str] = None
-    email: Optional[str] = None
-    direccion: Optional[str] = None
-    telefono: Optional[str] = None
-
-class ConfiguracionUsuario(BaseModel):
-    notificaciones_email: bool
-    tema_oscuro: bool
-    idioma: str
-
-class RegisterRequest(BaseModel):
-    correo: EmailStr
-    contrasena: str
-    nombre_completo: str
-    rut: str
-    rol: Optional[str] = "CLIENTE"
-
-class LoginRequest(BaseModel):
-    correo: EmailStr
-    contrasena: str
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-
-class TokenData(BaseModel):
-    correo: Optional[str] = None
-
-# Funciones de utilidad
-def verify_password(plain_password, stored_password):
-    # Si la contraseña almacenada no está hasheada (no comienza con $2)
-    if not stored_password.startswith('$2'):
-        return plain_password == stored_password
-    # Si está hasheada, usar bcrypt
-    return pwd_context.verify(plain_password, stored_password)
-
-def get_password_hash(password):
-    return pwd_context.hash(password)
-
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
-
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Credenciales inválidas",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+# ------------------- USUARIOS -------------------
+@app.route('/usuarios/registrar', methods=['POST'])
+def registrar_usuario():
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        correo: str = payload.get("sub")
-        if correo is None:
-            raise credentials_exception
-        token_data = TokenData(correo=correo)
-    except jwt.JWTError:
-        raise credentials_exception
-
-    cursor = connection.cursor()
-    cursor.execute("""
-        SELECT ID_USUARIO, NOMBRE_COMPLETO, CORREO, ROL, TELEFONO, FECHA_REGISTRO, ULTIMA_COMPRA
-        FROM USUARIOS
-        WHERE CORREO = :correo
-    """, correo=token_data.correo)
-    
-    user = cursor.fetchone()
-    cursor.close()
-    
-    if user is None:
-        raise credentials_exception
-        
-    return {
-        "id": user[0],
-        "nombre_completo": user[1],
-        "correo": user[2],
-        "rol": user[3],
-        "telefono": user[4],
-        "fecha_registro": user[5],
-        "ultima_compra": user[6]
-    }
-
-# Endpoints de autenticación
-@auth_router.post("/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = get_user_by_email(form_data.username)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    if not verify_password(form_data.password, user.contrasena):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    access_token = create_access_token(
-        data={"sub": user.correo}, expires_delta=timedelta(minutes=30)
-    )
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user
-    }
-
-@auth_router.post("/register", response_model=User)
-async def register(user: UserCreate):
-    db_user = get_user_by_email(user.correo)
-    if db_user:
-        raise HTTPException(
-            status_code=400,
-            detail="Email already registered"
-        )
-    return create_user(user)
-
-# Endpoints de usuarios
-@user_router.get("/me")
-async def read_users_me(current_user = Depends(get_current_user)):
-    return current_user
-
-@user_router.put("/me")
-async def update_user_me(user_update: UserUpdate, current_user = Depends(get_current_user)):
-    cursor = connection.cursor()
-    update_fields = []
-    params = {}
-    
-    if user_update.nombre_completo is not None:
-        update_fields.append("NOMBRE_COMPLETO = :nombre_completo")
-        params["nombre_completo"] = user_update.nombre_completo
-    
-    if user_update.rut is not None:
-        update_fields.append("RUT = :rut")
-        params["rut"] = user_update.rut
-    
-    if user_update.contrasena is not None:
-        update_fields.append("CONTRASENA = :contrasena")
-        params["contrasena"] = get_password_hash(user_update.contrasena)
-    
-    if not update_fields:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No se proporcionaron campos para actualizar"
-        )
-    
-    params["id"] = current_user["id"]
-    
-    try:
-        cursor.execute(f"""
-            UPDATE USUARIOS
-            SET {", ".join(update_fields)}
-            WHERE ID_USUARIO = :id
-            RETURNING ID_USUARIO, NOMBRE_COMPLETO, CORREO, ROL, TELEFONO, FECHA_REGISTRO
-        """, params)
-        
-        updated_user = cursor.fetchone()
-        connection.commit()
-        cursor.close()
-        
-        if not updated_user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Usuario no encontrado"
-            )
-        
-        return {
-            "status": "success",
-            "user": {
-                "id": updated_user[0],
-                "nombre_completo": updated_user[1],
-                "correo": updated_user[2],
-                "rol": updated_user[3],
-                "telefono": updated_user[4],
-                "fecha_registro": updated_user[5].strftime("%Y-%m-%d %H:%M:%S")
-            }
-        }
-        
-    except Exception as e:
-        cursor.close()
-        connection.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error al actualizar el usuario: {str(e)}"
-        )
-
-@user_router.delete("/me")
-async def delete_user_me(current_user = Depends(get_current_user)):
-    cursor = connection.cursor()
-    
-    try:
+        data = request.get_json()
+        rut = data.get('rut')
+        nombre = data.get('nombre_completo')
+        correo = data.get('correo')
+        contrasena = data.get('contrasena')
+        rol = data.get('rol')
+        if not all([rut, nombre, correo, contrasena, rol]):
+            return jsonify({'error': 'Faltan datos'}), 400
+        cursor = connection.cursor()
         cursor.execute("""
-            DELETE FROM USUARIOS
-            WHERE ID_USUARIO = :id
-        """, id=current_user["id"])
-        
+            INSERT INTO USUARIOS (RUT, NOMBRE_COMPLETO, CORREO, CONTRASENA, ROL)
+            VALUES (:rut, :nombre, :correo, :contrasena, :rol)
+        """, rut=rut, nombre=nombre, correo=correo, contrasena=contrasena, rol=rol)
         connection.commit()
         cursor.close()
-        
-        return {
-            "status": "success",
-            "message": "Usuario eliminado correctamente"
-        }
-        
+        return jsonify({'mensaje': 'Usuario registrado correctamente'})
     except Exception as e:
-        cursor.close()
-        connection.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error al eliminar el usuario: {str(e)}"
-        )
+        return jsonify({'error': str(e)}), 500
 
-# Endpoints de productos
-@product_router.get("/", response_model=List[ProductoResponse])
-async def get_productos():
-    print("Iniciando consulta de productos...")
+@app.route('/usuarios/login', methods=['POST'])
+def login_usuario():
+    try:
+        data = request.get_json()
+        correo = data.get('correo')
+        contrasena = data.get('contrasena')
+        if not all([correo, contrasena]):
+            return jsonify({'error': 'Faltan datos'}), 400
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT ID_USUARIO, NOMBRE_COMPLETO, ROL FROM USUARIOS WHERE CORREO = :correo AND CONTRASENA = :contrasena
+        """, correo=correo, contrasena=contrasena)
+        usuario = cursor.fetchone()
+        cursor.close()
+        if usuario:
+            return jsonify({'id_usuario': usuario[0], 'nombre_completo': usuario[1], 'rol': usuario[2]})
+        else:
+            return jsonify({'error': 'Credenciales incorrectas'}), 401
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/usuarios', methods=['GET'])
+def obtener_usuarios():
     try:
         cursor = connection.cursor()
-        print("Conexión a la base de datos establecida")
-        
-        query = """
-            SELECT DISTINCT
-                p.ID_PRODUCTO,
-                p.NOMBRE,
-                p.MARCA,
-                c.NOMBRE as CATEGORIA,
-                COALESCE(SUM(i.STOCK), 0) as stock_actual,
-                p.STOCK_MIN,
-                p.PRECIO_UNITARIO,
-                p.IMAGEN
-            FROM PRODUCTOS p
-            LEFT JOIN INVENTARIO i ON p.ID_PRODUCTO = i.ID_PRODUCTO
-            LEFT JOIN CATEGORIAS c ON p.ID_CATEGORIA = c.ID_CATEGORIA
-            GROUP BY p.ID_PRODUCTO, p.NOMBRE, p.MARCA, c.NOMBRE, p.STOCK_MIN, p.PRECIO_UNITARIO, p.IMAGEN
-            ORDER BY p.ID_PRODUCTO
-        """
-        
-        cursor.execute(query)
-        print("Consulta SQL ejecutada")
-        
-        productos = []
-        rows = cursor.fetchall()
-        print(f"Número de productos encontrados: {len(rows)}")
-        
-        for row in rows:
-            id_producto, nombre, marca, categoria, stock_actual, stock_min, precio_unitario, imagen = row
-            stock_mostrar = int(stock_actual) if stock_actual > stock_min else None
-
-            producto = {
-                "id_producto": id_producto,
-                "nombre": nombre,
-                "marca": marca,
-                "categoria": categoria if categoria else "General",
-                "stock_actual": stock_mostrar,
-                "precio_unitario": float(precio_unitario) if precio_unitario else None,
-                "imagen": imagen
-            }
-
-            if stock_actual < stock_min:
-                producto["alerta"] = "Stock bajo"
-
-            productos.append(producto)
-
+        cursor.execute("SELECT ID_USUARIO, RUT, NOMBRE_COMPLETO, CORREO, ROL, FECHA_REGISTRO FROM USUARIOS")
+        columns = [col[0].lower() for col in cursor.description]
+        usuarios = [dict(zip(columns, row)) for row in cursor.fetchall()]
         cursor.close()
-        print("Consulta completada exitosamente")
-        return productos
-        
+        return jsonify({'usuarios': usuarios})
     except Exception as e:
-        print(f"Error en la consulta: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error en la base de datos: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
-# Incluir los routers en la aplicación
-app.include_router(auth_router)
-app.include_router(user_router)
-app.include_router(product_router)
-
-# Endpoint para inicializar la base de datos
-@app.post("/api/init-db")
-async def init_db():
-    cursor = connection.cursor()
-    
+@app.route('/usuarios/<int:id_usuario>', methods=['GET'])
+def obtener_usuario(id_usuario):
     try:
-        # Actualizar contraseñas existentes a bcrypt
-        cursor.execute("SELECT ID_USUARIO, CONTRASENA FROM USUARIOS")
-        usuarios = cursor.fetchall()
-        
-        for usuario in usuarios:
-            id_usuario, contrasena = usuario
-            # Solo actualizar si la contraseña no parece estar hasheada
-            if not contrasena.startswith('$2'):
-                hashed_password = get_password_hash(contrasena)
-                cursor.execute("""
-                    UPDATE USUARIOS
-                    SET CONTRASENA = :contrasena
-                    WHERE ID_USUARIO = :id_usuario
-                """, {
-                    "contrasena": hashed_password,
-                    "id_usuario": id_usuario
-                })
-        
+        cursor = connection.cursor()
+        cursor.execute("SELECT ID_USUARIO, RUT, NOMBRE_COMPLETO, CORREO, ROL, FECHA_REGISTRO FROM USUARIOS WHERE ID_USUARIO = :id", id=id_usuario)
+        row = cursor.fetchone()
+        cursor.close()
+        if row:
+            columns = ['id_usuario', 'rut', 'nombre_completo', 'correo', 'rol', 'fecha_registro']
+            return jsonify(dict(zip(columns, row)))
+        else:
+            return jsonify({'error': 'Usuario no encontrado'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/usuarios/<int:id_usuario>', methods=['PUT'])
+def actualizar_usuario(id_usuario):
+    try:
+        data = request.get_json()
+        nombre = data.get('nombre_completo')
+        correo = data.get('correo')
+        rol = data.get('rol')
+        cursor = connection.cursor()
+        cursor.execute("""
+            UPDATE USUARIOS SET NOMBRE_COMPLETO = :nombre, CORREO = :correo, ROL = :rol WHERE ID_USUARIO = :id
+        """, nombre=nombre, correo=correo, rol=rol, id=id_usuario)
         connection.commit()
         cursor.close()
-        
-        return {
-            "status": "success",
-            "message": "Contraseñas actualizadas correctamente"
-        }
-        
+        return jsonify({'mensaje': 'Usuario actualizado correctamente'})
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/usuarios/<int:id_usuario>', methods=['DELETE'])
+def eliminar_usuario(id_usuario):
+    try:
+        cursor = connection.cursor()
+        cursor.execute("DELETE FROM USUARIOS WHERE ID_USUARIO = :id", id=id_usuario)
+        connection.commit()
         cursor.close()
-        connection.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error al actualizar las contraseñas: {str(e)}"
-        )
+        return jsonify({'mensaje': 'Usuario eliminado correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-async def get_user_or_404(user_id: int):
-    cursor = connection.cursor()
-    cursor.execute("""
-        SELECT ID_USUARIO, NOMBRE_COMPLETO, CORREO, ROL, TELEFONO, FECHA_REGISTRO
-        FROM USUARIOS
-        WHERE ID_USUARIO = :user_id
-    """, user_id=user_id)
-    
-    user = cursor.fetchone()
-    cursor.close()
-    
-    if not user:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Usuario con ID {user_id} no encontrado"
-        )
-    
-    return {
-        "id": user[0],
-        "nombre_completo": user[1],
-        "correo": user[2],
-        "rol": user[3],
-        "telefono": user[4],
-        "fecha_registro": user[5].strftime("%Y-%m-%d %H:%M:%S") if user[5] else None
-    }
+# ------------------- SUCURSALES -------------------
+@app.route('/sucursales', methods=['POST'])
+def crear_sucursal():
+    try:
+        data = request.get_json()
+        nombre = data.get('nombre')
+        direccion = data.get('direccion')
+        comuna = data.get('comuna')
+        region = data.get('region')
+        if not nombre:
+            return jsonify({'error': 'Faltan datos'}), 400
+        cursor = connection.cursor()
+        cursor.execute("""
+            INSERT INTO SUCURSALES (NOMBRE, DIRECCION, COMUNA, REGION)
+            VALUES (:nombre, :direccion, :comuna, :region)
+        """, nombre=nombre, direccion=direccion, comuna=comuna, region=region)
+        connection.commit()
+        cursor.close()
+        return jsonify({'mensaje': 'Sucursal creada correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-@app.post("/ingresar_stock")
-async def ingresar_stock(stock_data: StockInput):
+@app.route('/sucursales', methods=['GET'])
+def listar_sucursales():
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT ID_SUCURSAL, NOMBRE, DIRECCION, COMUNA, REGION FROM SUCURSALES")
+        columns = [col[0].lower() for col in cursor.description]
+        sucursales = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        cursor.close()
+        return jsonify({'sucursales': sucursales})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/sucursales/<int:id_sucursal>', methods=['GET'])
+def obtener_sucursal(id_sucursal):
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT ID_SUCURSAL, NOMBRE, DIRECCION, COMUNA, REGION FROM SUCURSALES WHERE ID_SUCURSAL = :id", id=id_sucursal)
+        row = cursor.fetchone()
+        cursor.close()
+        if row:
+            columns = ['id_sucursal', 'nombre', 'direccion', 'comuna', 'region']
+            return jsonify(dict(zip(columns, row)))
+        else:
+            return jsonify({'error': 'Sucursal no encontrada'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/sucursales/<int:id_sucursal>', methods=['PUT'])
+def actualizar_sucursal(id_sucursal):
+    try:
+        data = request.get_json()
+        nombre = data.get('nombre')
+        direccion = data.get('direccion')
+        comuna = data.get('comuna')
+        region = data.get('region')
+        cursor = connection.cursor()
+        cursor.execute("""
+            UPDATE SUCURSALES SET NOMBRE = :nombre, DIRECCION = :direccion, COMUNA = :comuna, REGION = :region WHERE ID_SUCURSAL = :id
+        """, nombre=nombre, direccion=direccion, comuna=comuna, region=region, id=id_sucursal)
+        connection.commit()
+        cursor.close()
+        return jsonify({'mensaje': 'Sucursal actualizada correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/sucursales/<int:id_sucursal>', methods=['DELETE'])
+def eliminar_sucursal(id_sucursal):
+    try:
+        cursor = connection.cursor()
+        cursor.execute("DELETE FROM SUCURSALES WHERE ID_SUCURSAL = :id", id=id_sucursal)
+        connection.commit()
+        cursor.close()
+        return jsonify({'mensaje': 'Sucursal eliminada correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ------------------- CATEGORÍAS Y SUBCATEGORÍAS -------------------
+@app.route('/categorias', methods=['POST'])
+def crear_categoria():
+    try:
+        data = request.get_json()
+        nombre = data.get('nombre')
+        if not nombre:
+            return jsonify({'error': 'Faltan datos'}), 400
+        cursor = connection.cursor()
+        cursor.execute("INSERT INTO CATEGORIAS (NOMBRE) VALUES (:nombre)", nombre=nombre)
+        connection.commit()
+        cursor.close()
+        return jsonify({'mensaje': 'Categoría creada correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/categorias', methods=['GET'])
+def listar_categorias():
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT ID_CATEGORIA, NOMBRE FROM CATEGORIAS")
+        columns = [col[0].lower() for col in cursor.description]
+        categorias = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        cursor.close()
+        return jsonify({'categorias': categorias})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/subcategorias', methods=['POST'])
+def crear_subcategoria():
+    try:
+        data = request.get_json()
+        id_categoria = data.get('id_categoria')
+        nombre = data.get('nombre')
+        if not all([id_categoria, nombre]):
+            return jsonify({'error': 'Faltan datos'}), 400
+        cursor = connection.cursor()
+        cursor.execute("INSERT INTO SUBCATEGORIAS (ID_CATEGORIA, NOMBRE) VALUES (:id_categoria, :nombre)", id_categoria=id_categoria, nombre=nombre)
+        connection.commit()
+        cursor.close()
+        return jsonify({'mensaje': 'Subcategoría creada correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/subcategorias', methods=['GET'])
+def listar_subcategorias():
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT ID_SUBCATEGORIA, ID_CATEGORIA, NOMBRE FROM SUBCATEGORIAS")
+        columns = [col[0].lower() for col in cursor.description]
+        subcategorias = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        cursor.close()
+        return jsonify({'subcategorias': subcategorias})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/categorias/<int:id_categoria>/subcategorias', methods=['GET'])
+def listar_subcategorias_por_categoria(id_categoria):
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT ID_SUBCATEGORIA, NOMBRE FROM SUBCATEGORIAS WHERE ID_CATEGORIA = :id_categoria", id_categoria=id_categoria)
+        columns = [col[0].lower() for col in cursor.description]
+        subcategorias = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        cursor.close()
+        return jsonify({'subcategorias': subcategorias})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ------------------- PRODUCTOS -------------------
+# (Puedes mover aquí la lógica de productos si lo deseas, o dejarla en app.py para evitar duplicidad)
+
+# ------------------- INVENTARIO -------------------
+@app.route('/inventario', methods=['GET'])
+def obtener_stock():
+    try:
+        id_sucursal = request.args.get('sucursal')
+        id_producto = request.args.get('producto')
+        cursor = connection.cursor()
+        if id_sucursal and id_producto:
+            cursor.execute("SELECT STOCK FROM INVENTARIO WHERE ID_SUCURSAL = :sucursal AND ID_PRODUCTO = :producto", sucursal=id_sucursal, producto=id_producto)
+            row = cursor.fetchone()
+            cursor.close()
+            if row:
+                return jsonify({'stock': row[0]})
+            else:
+                return jsonify({'error': 'No existe inventario para ese producto en la sucursal'}), 404
+        elif id_sucursal:
+            cursor.execute("SELECT ID_PRODUCTO, STOCK FROM INVENTARIO WHERE ID_SUCURSAL = :sucursal", sucursal=id_sucursal)
+            productos = [{'id_producto': row[0], 'stock': row[1]} for row in cursor.fetchall()]
+            cursor.close()
+            return jsonify({'inventario': productos})
+        else:
+            return jsonify({'error': 'Debe indicar al menos la sucursal'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/ingresar_stock', methods=['POST'])
+def ingresar_stock():
+    data = request.get_json()
+    id_sucursal = data.get('id_sucursal')
+    id_producto = data.get('id_producto')
+    cantidad = data.get('cantidad')
+    if not all([id_sucursal, id_producto, cantidad]):
+        return jsonify({'error': 'Faltan datos'}), 400
     cursor = connection.cursor()
-    
     cursor.execute("""
         SELECT STOCK FROM INVENTARIO 
         WHERE ID_SUCURSAL = :sucursal AND ID_PRODUCTO = :producto
-    """, sucursal=stock_data.id_sucursal, producto=stock_data.id_producto)
+    """, sucursal=id_sucursal, producto=id_producto)
     row = cursor.fetchone()
-
     if row:
-        nuevo_stock = row[0] + stock_data.cantidad
+        nuevo_stock = row[0] + cantidad
         cursor.execute("""
             UPDATE INVENTARIO 
             SET STOCK = :stock 
             WHERE ID_SUCURSAL = :sucursal AND ID_PRODUCTO = :producto
-        """, stock=nuevo_stock, sucursal=stock_data.id_sucursal, producto=stock_data.id_producto)
+        """, stock=nuevo_stock, sucursal=id_sucursal, producto=id_producto)
     else:
         cursor.execute("""
             INSERT INTO INVENTARIO (ID_SUCURSAL, ID_PRODUCTO, STOCK)
             VALUES (:sucursal, :producto, :stock)
-        """, sucursal=stock_data.id_sucursal, producto=stock_data.id_producto, stock=stock_data.cantidad)
-
+        """, sucursal=id_sucursal, producto=id_producto, stock=cantidad)
     connection.commit()
     cursor.close()
-    return {"mensaje": "Stock ingresado correctamente"}
+    return jsonify({'mensaje': 'Stock ingresado correctamente'})
 
-@app.post("/rebajar_stock")
-async def rebajar_stock(stock_data: StockInput):
+@app.route('/rebajar_stock', methods=['POST'])
+def rebajar_stock():
+    data = request.get_json()
+    id_sucursal = data.get('id_sucursal')
+    id_producto = data.get('id_producto')
+    cantidad = data.get('cantidad')
+    if not all([id_sucursal, id_producto, cantidad]):
+        return jsonify({'error': 'Faltan datos'}), 400
     cursor = connection.cursor()
-    
     cursor.execute("""
-        SELECT i.STOCK, p.STOCK_MIN
-        FROM INVENTARIO i
-        JOIN PRODUCTOS p ON i.ID_PRODUCTO = p.ID_PRODUCTO
-        WHERE i.ID_SUCURSAL = :sucursal AND i.ID_PRODUCTO = :producto
-    """, sucursal=stock_data.id_sucursal, producto=stock_data.id_producto)
+        SELECT STOCK FROM INVENTARIO 
+        WHERE ID_SUCURSAL = :sucursal AND ID_PRODUCTO = :producto
+    """, sucursal=id_sucursal, producto=id_producto)
     row = cursor.fetchone()
-
     if not row:
         cursor.close()
-        raise HTTPException(status_code=404, detail="Producto no existe en la sucursal")
-
-    stock_actual, stock_min = row
-    if stock_actual < stock_data.cantidad:
+        return jsonify({'error': 'Producto no existe en la sucursal'}), 404
+    stock_actual = row[0]
+    if stock_actual < cantidad:
         cursor.close()
-        raise HTTPException(status_code=400, detail="Stock insuficiente")
-
-    nuevo_stock = stock_actual - stock_data.cantidad
+        return jsonify({'error': 'Stock insuficiente'}), 400
+    nuevo_stock = stock_actual - cantidad
     cursor.execute("""
         UPDATE INVENTARIO 
         SET STOCK = :stock 
         WHERE ID_SUCURSAL = :sucursal AND ID_PRODUCTO = :producto
-    """, stock=nuevo_stock, sucursal=stock_data.id_sucursal, producto=stock_data.id_producto)
-
+    """, stock=nuevo_stock, sucursal=id_sucursal, producto=id_producto)
     connection.commit()
     cursor.close()
+    return jsonify({'mensaje': 'Stock rebajado correctamente'})
 
-    respuesta = {"mensaje": "Stock rebajado correctamente"}
-    if nuevo_stock < stock_min:
-        respuesta["alerta"] = "El stock está bajo"
-
-    return respuesta
-
-@app.get("/usuarios/{user_id}/perfil", response_model=UserProfile)
-async def get_user_profile(user_id: int):
+# ------------------- CARRITOS -------------------
+@app.route('/carritos', methods=['POST'])
+def crear_carrito():
     try:
-        user = await get_user_or_404(user_id)
-        
-        # Obtener la última compra
         cursor = connection.cursor()
-        cursor.execute("""
-            SELECT MAX(FECHA) 
-            FROM PEDIDOS 
-            WHERE ID_USUARIO = :user_id
-        """, user_id=user_id)
-        ultima_compra = cursor.fetchone()[0]
-        cursor.close()
-
-        return {
-            "id": user["id"],
-            "nombre": user["nombre_completo"],
-            "email": user["correo"],
-            "role": user["rol"],
-            "direccion": None,
-            "telefono": user["telefono"],
-            "fecha_registro": user["fecha_registro"].strftime("%Y-%m-%d"),
-            "ultima_compra": ultima_compra.strftime("%Y-%m-%d") if ultima_compra else None
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error al obtener perfil: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error interno del servidor")
-
-@app.put("/usuarios/perfil")
-async def update_user_profile(user_id: int, data: UpdateProfileRequest):
-    try:
-        # Verificar que el usuario existe
-        await get_user_or_404(user_id)
-        
-        # Construir la consulta SQL dinámicamente basada en los campos proporcionados
-        update_fields = []
-        params = {"user_id": user_id}
-        
-        if data.nombre is not None:
-            update_fields.append("NOMBRE_COMPLETO = :nombre")
-            params["nombre"] = data.nombre
-        if data.email is not None:
-            update_fields.append("CORREO = :email")
-            params["email"] = data.email
-        if data.direccion is not None:
-            update_fields.append("DIRECCION = :direccion")
-            params["direccion"] = data.direccion
-        if data.telefono is not None:
-            update_fields.append("TELEFONO = :telefono")
-            params["telefono"] = data.telefono
-
-        if not update_fields:
-            return {"status": "success", "message": "No hay campos para actualizar"}
-
-        query = f"""
-            UPDATE USUARIOS 
-            SET {", ".join(update_fields)}
-            WHERE ID_USUARIO = :user_id
-        """
-        
-        cursor = connection.cursor()
-        cursor.execute(query, params)
+        cursor.execute("INSERT INTO CARRITOS DEFAULT VALUES RETURNING ID_CARRITO INTO :id", id=cursor.var(int))
+        id_carrito = cursor.getimplicitresults()[0][0]
         connection.commit()
         cursor.close()
-
-        return {"status": "success", "message": "Perfil actualizado exitosamente"}
-    except HTTPException:
-        raise
+        return jsonify({'id_carrito': id_carrito, 'mensaje': 'Carrito creado correctamente'})
     except Exception as e:
-        print(f"Error al actualizar perfil: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error interno del servidor")
+        return jsonify({'error': str(e)}), 500
 
-@app.get("/usuarios/{user_id}/configuracion")
-async def get_user_config(user_id: int):
+@app.route('/carritos/<int:id_carrito>/productos', methods=['POST'])
+def agregar_producto_carrito(id_carrito):
     try:
-        # Verificar que el usuario existe
-        await get_user_or_404(user_id)
-        
+        data = request.get_json()
+        id_producto = data.get('id_producto')
+        id_sucursal = data.get('id_sucursal')
+        cantidad = data.get('cantidad')
+        valor_unitario = data.get('valor_unitario')
+        valor_total = data.get('valor_total')
+        if not all([id_producto, id_sucursal, cantidad, valor_unitario, valor_total]):
+            return jsonify({'error': 'Faltan datos'}), 400
         cursor = connection.cursor()
         cursor.execute("""
-            SELECT NOTIFICACIONES_EMAIL, TEMA_OSCURO, IDIOMA
-            FROM CONFIGURACION_USUARIO
-            WHERE ID_USUARIO = :user_id
-        """, user_id=user_id)
-        
-        config = cursor.fetchone()
-        cursor.close()
-
-        if not config:
-            # Si no existe configuración, devolver valores por defecto
-            return {
-                "notificaciones_email": True,
-                "tema_oscuro": False,
-                "idioma": "es"
-            }
-
-        return {
-            "notificaciones_email": bool(config[0]),
-            "tema_oscuro": bool(config[1]),
-            "idioma": config[2]
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error al obtener configuración: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error interno del servidor")
-
-@app.put("/usuarios/{user_id}/configuracion")
-async def update_user_config(user_id: int, config: ConfiguracionUsuario):
-    try:
-        # Verificar que el usuario existe
-        await get_user_or_404(user_id)
-        
-        cursor = connection.cursor()
-        cursor.execute("""
-            MERGE INTO CONFIGURACION_USUARIO
-            USING DUAL ON (ID_USUARIO = :user_id)
-            WHEN MATCHED THEN
-                UPDATE SET
-                    NOTIFICACIONES_EMAIL = :notif,
-                    TEMA_OSCURO = :tema,
-                    IDIOMA = :idioma
-            WHEN NOT MATCHED THEN
-                INSERT (ID_USUARIO, NOTIFICACIONES_EMAIL, TEMA_OSCURO, IDIOMA)
-                VALUES (:user_id, :notif, :tema, :idioma)
-        """, {
-            "user_id": user_id,
-            "notif": config.notificaciones_email,
-            "tema": config.tema_oscuro,
-            "idioma": config.idioma
-        })
-        
+            INSERT INTO CARRITO_PRODUCTOS (ID_CARRITO, ID_PRODUCTO, ID_SUCURSAL, CANTIDAD, VALOR_UNITARIO, VALOR_TOTAL)
+            VALUES (:id_carrito, :id_producto, :id_sucursal, :cantidad, :valor_unitario, :valor_total)
+        """, id_carrito=id_carrito, id_producto=id_producto, id_sucursal=id_sucursal, cantidad=cantidad, valor_unitario=valor_unitario, valor_total=valor_total)
         connection.commit()
         cursor.close()
-
-        return {"status": "success", "message": "Configuración actualizada exitosamente"}
-    except HTTPException:
-        raise
+        return jsonify({'mensaje': 'Producto agregado al carrito'})
     except Exception as e:
-        print(f"Error al actualizar configuración: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error interno del servidor")
+        return jsonify({'error': str(e)}), 500
 
-@app.get("/api/usuarios", response_model=List[User])
-async def get_users(current_user: User = Depends(get_user_by_token)):
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute("SELECT * FROM USUARIOS")
-    users = cursor.fetchall()
-    cursor.close()
-    db.close()
-    
-    return [
-        User(
-            id=user[0],
-            nombre_completo=user[1],
-            rut=user[2],
-            correo=user[3],
-            rol=user[5],
-            fecha_registro=str(user[6])
-        )
-        for user in users
-    ]
-
-@app.get("/api/usuarios/{user_id}", response_model=User)
-async def get_user(user_id: int, current_user: User = Depends(get_user_by_token)):
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute("SELECT * FROM USUARIOS WHERE ID_USUARIO = :1", (user_id,))
-    user = cursor.fetchone()
-    cursor.close()
-    db.close()
-    
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    return User(
-        id=user[0],
-        nombre_completo=user[1],
-        rut=user[2],
-        correo=user[3],
-        rol=user[5],
-        fecha_registro=str(user[6])
-    )
-
-@app.put("/api/usuarios/{user_id}", response_model=User)
-async def update_user(
-    user_id: int,
-    user_update: UserUpdate,
-    current_user: User = Depends(get_user_by_token)
-):
-    if current_user.rol != "ADMIN" and current_user.id != user_id:
-        raise HTTPException(
-            status_code=403,
-            detail="Not enough permissions"
-        )
-    
-    db = get_db()
-    cursor = db.cursor()
-    
-    # Verificar si el correo ya existe para otro usuario
-    cursor.execute(
-        "SELECT ID_USUARIO FROM USUARIOS WHERE CORREO = :1 AND ID_USUARIO != :2",
-        (user_update.correo, user_id)
-    )
-    if cursor.fetchone():
+@app.route('/carritos/<int:id_carrito>/productos/<int:id_producto>', methods=['DELETE'])
+def eliminar_producto_carrito(id_carrito, id_producto):
+    try:
+        cursor = connection.cursor()
+        cursor.execute("DELETE FROM CARRITO_PRODUCTOS WHERE ID_CARRITO = :id_carrito AND ID_PRODUCTO = :id_producto", id_carrito=id_carrito, id_producto=id_producto)
+        connection.commit()
         cursor.close()
-        db.close()
-        raise HTTPException(
-            status_code=400,
-            detail="Email already registered"
-        )
-    
-    # Verificar si el RUT ya existe para otro usuario
-    cursor.execute(
-        "SELECT ID_USUARIO FROM USUARIOS WHERE RUT = :1 AND ID_USUARIO != :2",
-        (user_update.rut, user_id)
-    )
-    if cursor.fetchone():
-        cursor.close()
-        db.close()
-        raise HTTPException(
-            status_code=400,
-            detail="RUT already registered"
-        )
-    
-    cursor.execute("""
-        UPDATE USUARIOS
-        SET NOMBRE_COMPLETO = :1, RUT = :2, CORREO = :3
-        WHERE ID_USUARIO = :4
-    """, (user_update.nombre_completo, user_update.rut, user_update.correo, user_id))
-    
-    db.commit()
-    
-    # Obtener el usuario actualizado
-    cursor.execute("SELECT * FROM USUARIOS WHERE ID_USUARIO = :1", (user_id,))
-    user = cursor.fetchone()
-    cursor.close()
-    db.close()
-    
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    return User(
-        id=user[0],
-        nombre_completo=user[1],
-        rut=user[2],
-        correo=user[3],
-        rol=user[5],
-        fecha_registro=str(user[6])
-    )
+        return jsonify({'mensaje': 'Producto eliminado del carrito'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-@app.delete("/api/usuarios/{user_id}")
-async def delete_user(user_id: int, current_user: User = Depends(get_user_by_token)):
-    if current_user.rol != "ADMIN":
-        raise HTTPException(
-            status_code=403,
-            detail="Not enough permissions"
-        )
-    
-    if current_user.id == user_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot delete your own user"
-        )
-    
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute("DELETE FROM USUARIOS WHERE ID_USUARIO = :1", (user_id,))
-    db.commit()
-    cursor.close()
-    db.close()
-    
-    return {"message": "User deleted successfully"}
+@app.route('/carritos/<int:id_carrito>/productos', methods=['GET'])
+def listar_productos_carrito(id_carrito):
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT ID_PRODUCTO, ID_SUCURSAL, CANTIDAD, VALOR_UNITARIO, VALOR_TOTAL FROM CARRITO_PRODUCTOS WHERE ID_CARRITO = :id_carrito", id_carrito=id_carrito)
+        columns = [col[0].lower() for col in cursor.description]
+        productos = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        cursor.close()
+        return jsonify({'productos': productos})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/carritos/<int:id_carrito>/vaciar', methods=['DELETE'])
+def vaciar_carrito(id_carrito):
+    try:
+        cursor = connection.cursor()
+        cursor.execute("DELETE FROM CARRITO_PRODUCTOS WHERE ID_CARRITO = :id_carrito", id_carrito=id_carrito)
+        connection.commit()
+        cursor.close()
+        return jsonify({'mensaje': 'Carrito vaciado correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ------------------- PEDIDOS -------------------
+@app.route('/pedidos', methods=['POST'])
+def crear_pedido():
+    try:
+        data = request.get_json()
+        id_usuario = data.get('id_usuario')
+        id_carrito = data.get('id_carrito')
+        direccion = data.get('direccion')
+        if not all([id_usuario, id_carrito, direccion]):
+            return jsonify({'error': 'Faltan datos'}), 400
+        cursor = connection.cursor()
+        # Crear detalle de pedido
+        cursor.execute("INSERT INTO DETALLE_PEDIDO (ID_CARRITO, DIRECCION, ID_USUARIO) VALUES (:id_carrito, :direccion, :id_usuario) RETURNING ID_DETALLE INTO :id_detalle", id_carrito=id_carrito, direccion=direccion, id_usuario=id_usuario, id_detalle=cursor.var(int))
+        id_detalle = cursor.getimplicitresults()[0][0]
+        # Crear pedido
+        cursor.execute("INSERT INTO PEDIDOS (ID_USUARIO, ID_DETALLE) VALUES (:id_usuario, :id_detalle) RETURNING ID_PEDIDO INTO :id_pedido", id_usuario=id_usuario, id_detalle=id_detalle, id_pedido=cursor.var(int))
+        id_pedido = cursor.getimplicitresults()[0][0]
+        connection.commit()
+        cursor.close()
+        return jsonify({'id_pedido': id_pedido, 'mensaje': 'Pedido creado correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/pedidos', methods=['GET'])
+def listar_pedidos():
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT ID_PEDIDO, ID_USUARIO, FECHA_PEDIDO, ID_DETALLE FROM PEDIDOS")
+        columns = [col[0].lower() for col in cursor.description]
+        pedidos = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        cursor.close()
+        return jsonify({'pedidos': pedidos})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/pedidos/<int:id_pedido>', methods=['GET'])
+def obtener_pedido(id_pedido):
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT ID_PEDIDO, ID_USUARIO, FECHA_PEDIDO, ID_DETALLE FROM PEDIDOS WHERE ID_PEDIDO = :id_pedido", id_pedido=id_pedido)
+        row = cursor.fetchone()
+        cursor.close()
+        if row:
+            columns = ['id_pedido', 'id_usuario', 'fecha_pedido', 'id_detalle']
+            return jsonify(dict(zip(columns, row)))
+        else:
+            return jsonify({'error': 'Pedido no encontrado'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/usuarios/<int:id_usuario>/pedidos', methods=['GET'])
+def listar_pedidos_usuario(id_usuario):
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT ID_PEDIDO, FECHA_PEDIDO, ID_DETALLE FROM PEDIDOS WHERE ID_USUARIO = :id_usuario", id_usuario=id_usuario)
+        columns = [col[0].lower() for col in cursor.description]
+        pedidos = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        cursor.close()
+        return jsonify({'pedidos': pedidos})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/pedidos/<int:id_pedido>/estado', methods=['PUT'])
+def actualizar_estado_pedido(id_pedido):
+    try:
+        data = request.get_json()
+        estado = data.get('estado')
+        if estado not in ['PENDIENTE', 'CONFIRMADO', 'ENVIADO', 'ENTREGADO', 'CANCELADO']:
+            return jsonify({'error': 'Estado no válido'}), 400
+        cursor = connection.cursor()
+        cursor.execute("UPDATE DETALLE_PEDIDO SET ESTADO = :estado WHERE ID_DETALLE = (SELECT ID_DETALLE FROM PEDIDOS WHERE ID_PEDIDO = :id_pedido)", estado=estado, id_pedido=id_pedido)
+        connection.commit()
+        cursor.close()
+        return jsonify({'mensaje': 'Estado de pedido actualizado'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ------------------- PAGOS -------------------
+@app.route('/pagos', methods=['POST'])
+def registrar_pago():
+    try:
+        data = request.get_json()
+        id_pedido = data.get('id_pedido')
+        monto_total = data.get('monto_total')
+        metodo_pago = data.get('metodo_pago')
+        estado_pago = data.get('estado_pago')
+        if not all([id_pedido, monto_total, metodo_pago, estado_pago]):
+            return jsonify({'error': 'Faltan datos'}), 400
+        cursor = connection.cursor()
+        cursor.execute("""
+            INSERT INTO PAGOS (ID_PEDIDO, MONTO_TOTAL, METODO_PAGO, ESTADO_PAGO)
+            VALUES (:id_pedido, :monto_total, :metodo_pago, :estado_pago)
+        """, id_pedido=id_pedido, monto_total=monto_total, metodo_pago=metodo_pago, estado_pago=estado_pago)
+        connection.commit()
+        cursor.close()
+        return jsonify({'mensaje': 'Pago registrado correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/pagos', methods=['GET'])
+def listar_pagos():
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT ID_PAGO, ID_PEDIDO, MONTO_TOTAL, METODO_PAGO, ESTADO_PAGO, FECHA_PAGO FROM PAGOS")
+        columns = [col[0].lower() for col in cursor.description]
+        pagos = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        cursor.close()
+        return jsonify({'pagos': pagos})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/pagos/<int:id_pago>', methods=['GET'])
+def obtener_pago(id_pago):
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT ID_PAGO, ID_PEDIDO, MONTO_TOTAL, METODO_PAGO, ESTADO_PAGO, FECHA_PAGO FROM PAGOS WHERE ID_PAGO = :id_pago", id_pago=id_pago)
+        row = cursor.fetchone()
+        cursor.close()
+        if row:
+            columns = ['id_pago', 'id_pedido', 'monto_total', 'metodo_pago', 'estado_pago', 'fecha_pago']
+            return jsonify(dict(zip(columns, row)))
+        else:
+            return jsonify({'error': 'Pago no encontrado'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ------------------- BITÁCORA -------------------
+@app.route('/bitacora', methods=['GET'])
+def listar_bitacora():
+    try:
+        id_usuario = request.args.get('usuario')
+        cursor = connection.cursor()
+        if id_usuario:
+            cursor.execute("SELECT ID_LOG, ID_USUARIO, ACCION, FECHA_ACCION FROM BITACORA WHERE ID_USUARIO = :id_usuario", id_usuario=id_usuario)
+        else:
+            cursor.execute("SELECT ID_LOG, ID_USUARIO, ACCION, FECHA_ACCION FROM BITACORA")
+        columns = [col[0].lower() for col in cursor.description]
+        logs = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        cursor.close()
+        return jsonify({'bitacora': logs})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    app.run()
