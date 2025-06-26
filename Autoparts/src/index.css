@@ -1,3 +1,47 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+.footer {
+  background: #1a2233;
+  color: #e5e7eb;
+  padding: 2rem 0 1rem 0;
+  text-align: center;
+  font-size: 1rem;
+}
+.footer a {
+  color: #60a5fa;
+  text-decoration: none;
+  margin: 0 0.5rem;
+  transition: color 0.2s;
+}
+.footer a:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+.footer .footer-logo {
+  font-weight: bold;
+  font-size: 1.3rem;
+  letter-spacing: 1px;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.footer .footer-social {
+  margin: 1rem 0 0.5rem 0;
+}
+.footer .footer-social a {
+  color: #60a5fa;
+  font-size: 1.3rem;
+  margin: 0 0.4rem;
+  transition: color 0.2s;
+}
+.footer .footer-social a:hover {
+  color: #fff;
+}
+.footer .footer-copy {
+  font-size: 0.95rem;
+  color: #9ca3af;
+  margin-top: 0.5rem;
+}
