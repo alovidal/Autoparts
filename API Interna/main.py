@@ -35,12 +35,17 @@ def login_usuario():
             return jsonify({'error': 'Faltan datos'}), 400
         cursor = connection.cursor()
         cursor.execute("""
-            SELECT ID_USUARIO, NOMBRE_COMPLETO, ROL FROM USUARIOS WHERE CORREO = :correo AND CONTRASENA = :contrasena
+            SELECT ID_USUARIO, NOMBRE_COMPLETO, CORREO, ROL FROM USUARIOS WHERE CORREO = :correo AND CONTRASENA = :contrasena
         """, correo=correo, contrasena=contrasena)
         usuario = cursor.fetchone()
         cursor.close()
         if usuario:
-            return jsonify({'id_usuario': usuario[0], 'nombre_completo': usuario[1], 'rol': usuario[2]})
+            return jsonify({
+                'id_usuario': usuario[0],
+                'nombre_completo': usuario[1],
+                'correo': usuario[2],
+                'rol': usuario[3]
+            })
         else:
             return jsonify({'error': 'Credenciales incorrectas'}), 401
     except Exception as e:
@@ -247,8 +252,170 @@ def listar_subcategorias_por_categoria(id_categoria):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/categorias/<int:id_categoria>', methods=['PUT'])
+def actualizar_categoria(id_categoria):
+    try:
+        data = request.get_json()
+        nombre = data.get('nombre')
+        if not nombre:
+            return jsonify({'error': 'Faltan datos'}), 400
+        cursor = connection.cursor()
+        cursor.execute("""
+            UPDATE CATEGORIAS SET NOMBRE = :nombre WHERE ID_CATEGORIA = :id_categoria
+        """, nombre=nombre, id_categoria=id_categoria)
+        connection.commit()
+        cursor.close()
+        return jsonify({'mensaje': 'Categoría actualizada correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/categorias/<int:id_categoria>', methods=['DELETE'])
+def eliminar_categoria(id_categoria):
+    try:
+        cursor = connection.cursor()
+        cursor.execute("DELETE FROM CATEGORIAS WHERE ID_CATEGORIA = :id_categoria", id_categoria=id_categoria)
+        connection.commit()
+        cursor.close()
+        return jsonify({'mensaje': 'Categoría eliminada correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # ------------------- PRODUCTOS -------------------
-# (Puedes mover aquí la lógica de productos si lo deseas, o dejarla en app.py para evitar duplicidad)
+@app.route('/productos', methods=['GET'])
+def obtener_productos():
+    try:
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT 
+                p.ID_PRODUCTO,
+                p.CODIGO_FABRICANTE,
+                p.MARCA,
+                p.CODIGO_INTERNO,
+                p.NOMBRE,
+                p.DESCRIPCION,
+                p.PRECIO_UNITARIO,
+                p.STOCK_MIN,
+                p.ID_CATEGORIA,
+                p.IMAGEN,
+                i.STOCK,
+                s.NOMBRE as SUCURSAL_NOMBRE
+            FROM PRODUCTOS p
+            LEFT JOIN INVENTARIO i ON p.ID_PRODUCTO = i.ID_PRODUCTO
+            LEFT JOIN SUCURSALES s ON i.ID_SUCURSAL = s.ID_SUCURSAL
+            ORDER BY p.NOMBRE
+        """)
+        columns = [col[0].lower() for col in cursor.description]
+        productos = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        cursor.close()
+        return jsonify({'productos': productos})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/productos/<int:id_producto>', methods=['GET'])
+def obtener_producto(id_producto):
+    try:
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT 
+                p.ID_PRODUCTO,
+                p.CODIGO_FABRICANTE,
+                p.MARCA,
+                p.CODIGO_INTERNO,
+                p.NOMBRE,
+                p.DESCRIPCION,
+                p.PRECIO_UNITARIO,
+                p.STOCK_MIN,
+                p.ID_CATEGORIA,
+                p.IMAGEN,
+                i.STOCK,
+                s.NOMBRE as SUCURSAL_NOMBRE
+            FROM PRODUCTOS p
+            LEFT JOIN INVENTARIO i ON p.ID_PRODUCTO = i.ID_PRODUCTO
+            LEFT JOIN SUCURSALES s ON i.ID_SUCURSAL = s.ID_SUCURSAL
+            WHERE p.ID_PRODUCTO = :id_producto
+        """, id_producto=id_producto)
+        columns = [col[0].lower() for col in cursor.description]
+        productos = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        cursor.close()
+        
+        if productos:
+            return jsonify(productos[0])
+        else:
+            return jsonify({'error': 'Producto no encontrado'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/productos', methods=['POST'])
+def crear_producto():
+    try:
+        data = request.get_json()
+        codigo_fabricante = data.get('codigo_fabricante')
+        marca = data.get('marca')
+        codigo_interno = data.get('codigo_interno')
+        nombre = data.get('nombre')
+        descripcion = data.get('descripcion')
+        precio_unitario = data.get('precio_unitario')
+        stock_min = data.get('stock_min')
+        id_categoria = data.get('id_categoria')
+        imagen = data.get('imagen')
+        if not all([codigo_fabricante, marca, codigo_interno, nombre, descripcion, precio_unitario, stock_min, id_categoria]):
+            return jsonify({'error': 'Faltan datos'}), 400
+        cursor = connection.cursor()
+        cursor.execute("""
+            INSERT INTO PRODUCTOS (CODIGO_FABRICANTE, MARCA, CODIGO_INTERNO, NOMBRE, DESCRIPCION, PRECIO_UNITARIO, STOCK_MIN, ID_CATEGORIA, IMAGEN)
+            VALUES (:codigo_fabricante, :marca, :codigo_interno, :nombre, :descripcion, :precio_unitario, :stock_min, :id_categoria, :imagen)
+        """, codigo_fabricante=codigo_fabricante, marca=marca, codigo_interno=codigo_interno, nombre=nombre, descripcion=descripcion, precio_unitario=precio_unitario, stock_min=stock_min, id_categoria=id_categoria, imagen=imagen)
+        connection.commit()
+        cursor.close()
+        return jsonify({'mensaje': 'Producto creado correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/productos/<int:id_producto>', methods=['PUT'])
+def actualizar_producto(id_producto):
+    try:
+        data = request.get_json()
+        codigo_fabricante = data.get('codigo_fabricante')
+        marca = data.get('marca')
+        codigo_interno = data.get('codigo_interno')
+        nombre = data.get('nombre')
+        descripcion = data.get('descripcion')
+        precio_unitario = data.get('precio_unitario')
+        stock_min = data.get('stock_min')
+        id_categoria = data.get('id_categoria')
+        imagen = data.get('imagen')
+        if not all([codigo_fabricante, marca, codigo_interno, nombre, descripcion, precio_unitario, stock_min, id_categoria]):
+            return jsonify({'error': 'Faltan datos'}), 400
+        cursor = connection.cursor()
+        cursor.execute("""
+            UPDATE PRODUCTOS SET
+                CODIGO_FABRICANTE = :codigo_fabricante,
+                MARCA = :marca,
+                CODIGO_INTERNO = :codigo_interno,
+                NOMBRE = :nombre,
+                DESCRIPCION = :descripcion,
+                PRECIO_UNITARIO = :precio_unitario,
+                STOCK_MIN = :stock_min,
+                ID_CATEGORIA = :id_categoria,
+                IMAGEN = :imagen
+            WHERE ID_PRODUCTO = :id_producto
+        """, codigo_fabricante=codigo_fabricante, marca=marca, codigo_interno=codigo_interno, nombre=nombre, descripcion=descripcion, precio_unitario=precio_unitario, stock_min=stock_min, id_categoria=id_categoria, imagen=imagen, id_producto=id_producto)
+        connection.commit()
+        cursor.close()
+        return jsonify({'mensaje': 'Producto actualizado correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/productos/<int:id_producto>', methods=['DELETE'])
+def eliminar_producto(id_producto):
+    try:
+        cursor = connection.cursor()
+        cursor.execute("DELETE FROM PRODUCTOS WHERE ID_PRODUCTO = :id_producto", id_producto=id_producto)
+        connection.commit()
+        cursor.close()
+        return jsonify({'mensaje': 'Producto eliminado correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # ------------------- INVENTARIO -------------------
 @app.route('/inventario', methods=['GET'])
@@ -335,6 +502,21 @@ def rebajar_stock():
     connection.commit()
     cursor.close()
     return jsonify({'mensaje': 'Stock rebajado correctamente'})
+
+@app.route('/inventario', methods=['DELETE'])
+def eliminar_inventario():
+    id_sucursal = request.args.get('sucursal')
+    id_producto = request.args.get('producto')
+    if not id_sucursal or not id_producto:
+        return jsonify({'error': 'Faltan parámetros'}), 400
+    try:
+        cursor = connection.cursor()
+        cursor.execute("DELETE FROM INVENTARIO WHERE ID_SUCURSAL = :sucursal AND ID_PRODUCTO = :producto", sucursal=id_sucursal, producto=id_producto)
+        connection.commit()
+        cursor.close()
+        return jsonify({'mensaje': 'Registro de inventario eliminado correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # ------------------- CARRITOS -------------------
 @app.route('/carritos', methods=['POST'])
@@ -459,7 +641,19 @@ def obtener_pedido(id_pedido):
 def listar_pedidos_usuario(id_usuario):
     try:
         cursor = connection.cursor()
-        cursor.execute("SELECT ID_PEDIDO, FECHA_PEDIDO, ID_DETALLE FROM PEDIDOS WHERE ID_USUARIO = :id_usuario", id_usuario=id_usuario)
+        cursor.execute("""
+            SELECT 
+                p.ID_PEDIDO, 
+                p.FECHA_PEDIDO, 
+                p.ID_DETALLE,
+                d.ESTADO,
+                COALESCE(pg.MONTO_TOTAL, 0) as TOTAL
+            FROM PEDIDOS p
+            JOIN DETALLE_PEDIDO d ON p.ID_DETALLE = d.ID_DETALLE
+            LEFT JOIN PAGOS pg ON p.ID_PEDIDO = pg.ID_PEDIDO
+            WHERE p.ID_USUARIO = :id_usuario
+            ORDER BY p.FECHA_PEDIDO DESC
+        """, id_usuario=id_usuario)
         columns = [col[0].lower() for col in cursor.description]
         pedidos = [dict(zip(columns, row)) for row in cursor.fetchall()]
         cursor.close()
@@ -528,6 +722,37 @@ def obtener_pago(id_pago):
             return jsonify(dict(zip(columns, row)))
         else:
             return jsonify({'error': 'Pago no encontrado'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/pagos/<int:id_pago>', methods=['PUT'])
+def actualizar_pago(id_pago):
+    try:
+        data = request.get_json()
+        estado_pago = data.get('estado_pago')
+        metodo_pago = data.get('metodo_pago')
+        monto_total = data.get('monto_total')
+        if not estado_pago and not metodo_pago and not monto_total:
+            return jsonify({'error': 'No hay campos para actualizar'}), 400
+        cursor = connection.cursor()
+        sets = []
+        params = {'id_pago': id_pago}
+        if estado_pago:
+            sets.append('ESTADO_PAGO = :estado_pago')
+            params['estado_pago'] = estado_pago
+        if metodo_pago:
+            sets.append('METODO_PAGO = :metodo_pago')
+            params['metodo_pago'] = metodo_pago
+        if monto_total:
+            sets.append('MONTO_TOTAL = :monto_total')
+            params['monto_total'] = monto_total
+        set_clause = ', '.join(sets)
+        cursor.execute(f"""
+            UPDATE PAGOS SET {set_clause} WHERE ID_PAGO = :id_pago
+        """, params)
+        connection.commit()
+        cursor.close()
+        return jsonify({'mensaje': 'Pago actualizado correctamente'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

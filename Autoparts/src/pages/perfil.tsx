@@ -1,255 +1,72 @@
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
-import type { UserProfile, UpdateProfileRequest } from '../types/api';
-import { apiService } from '../services/api';
-import { useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import toast from 'react-hot-toast';
+import { UserIcon } from '@heroicons/react/24/solid';
 
-const PerfilPage: React.FC = () => {
-    const { user } = useAuth();
-    const navigate = useNavigate();
-    const [profile, setProfile] = useState<UserProfile | null>(null);
-    const [isEditing, setIsEditing] = useState(false);
-    const [formData, setFormData] = useState<UpdateProfileRequest>({});
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [successMessage, setSuccessMessage] = useState<string | null>(null);
+const Perfil: React.FC = () => {
+  const { user, updateUser } = useAuth();
+  const [nombre, setNombre] = useState(user?.nombre_completo || '');
+  const [correo, setCorreo] = useState(user?.correo || '');
+  const [contrasena, setContrasena] = useState('');
+  const [editando, setEditando] = useState(false);
 
-    useEffect(() => {
-        const fetchProfile = async () => {
-            if (!user?.id) {
-                setError('Debes iniciar sesión para ver tu perfil');
-                return;
-            }
+  if (!user) {
+    return <div className="p-8 text-center text-red-600">Debes iniciar sesión para ver tu perfil.</div>;
+  }
 
-            try {
-                const response = await apiService.getUserProfile(user.id);
-                if (response.status === 'success' && response.profile) {
-                    setProfile(response.profile);
-                    setFormData({
-                        nombre: response.profile.nombre,
-                        email: response.profile.email,
-                        direccion: response.profile.direccion,
-                        telefono: response.profile.telefono
-                    });
-                } else {
-                    if (response.message === 'Usuario no encontrado') {
-                        setError('Tu perfil no se encuentra en el sistema. Por favor, contacta a soporte.');
-                    } else {
-                        throw new Error(response.message || 'Error al cargar el perfil');
-                    }
-                }
-            } catch (err) {
-                const errorMessage = err instanceof Error ? err.message : 'Error al cargar el perfil';
-                setError(errorMessage);
-                if (errorMessage === 'Usuario no encontrado') {
-                    setTimeout(() => {
-                        navigate('/');
-                    }, 3000);
-                }
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchProfile();
-    }, [user?.id, navigate]);
-
-    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
-    };
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!user?.id) {
-            setError('Debes iniciar sesión para actualizar tu perfil');
-            return;
-        }
-
-        setError(null);
-        setSuccessMessage(null);
-
-        try {
-            const response = await apiService.updateProfile(user.id, formData);
-            if (response.status === 'success') {
-                setSuccessMessage('Perfil actualizado exitosamente');
-                setIsEditing(false);
-                // Recargar el perfil para mostrar los cambios actualizados
-                const profileResponse = await apiService.getUserProfile(user.id);
-                if (profileResponse.status === 'success' && profileResponse.profile) {
-                    setProfile(profileResponse.profile);
-                }
-            } else {
-                if (response.message === 'Usuario no encontrado') {
-                    setError('Tu perfil no se encuentra en el sistema. Por favor, contacta a soporte.');
-                    setTimeout(() => {
-                        navigate('/');
-                    }, 3000);
-                } else {
-                    throw new Error(response.message || 'Error al actualizar el perfil');
-                }
-            }
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Error al actualizar el perfil');
-        }
-    };
-
-    if (loading) {
-        return (
-            <div className="flex justify-center items-center min-h-screen">
-                <div className="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-blue-500"></div>
-            </div>
-        );
+  const handleGuardar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await updateUser({ nombre_completo: nombre, correo, contrasena });
+      toast.success('Perfil actualizado');
+      setEditando(false);
+    } catch {
+      toast.error('Error al actualizar el perfil');
     }
+  };
 
-    if (error) {
-        return (
-            <div className="min-h-screen flex items-center justify-center">
-                <div className="text-center p-8 bg-red-50 rounded-lg">
-                    <div className="text-red-600 text-xl mb-4">⚠️</div>
-                    <h3 className="text-xl font-semibold mb-2 text-red-700">Error</h3>
-                    <p className="text-red-600">{error}</p>
-                    {error === 'Usuario no encontrado' && (
-                        <p className="mt-4 text-sm text-gray-600">
-                            Serás redirigido a la página principal en unos segundos...
-                        </p>
-                    )}
-                </div>
-            </div>
-        );
-    }
-
-    return (
-        <div className="min-h-screen bg-gray-50 py-8">
-            <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="bg-white shadow rounded-lg">
-                    {/* Encabezado */}
-                    <div className="px-6 py-4 border-b border-gray-200">
-                        <div className="flex items-center justify-between">
-                            <h2 className="text-2xl font-bold text-gray-900">Mi Perfil</h2>
-                            <button
-                                onClick={() => setIsEditing(!isEditing)}
-                                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                            >
-                                {isEditing ? 'Cancelar' : 'Editar Perfil'}
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Contenido */}
-                    <div className="px-6 py-4">
-                        {successMessage && (
-                            <div className="mb-4 p-4 bg-green-50 rounded-md">
-                                <p className="text-green-700">{successMessage}</p>
-                            </div>
-                        )}
-
-                        {isEditing ? (
-                            <form onSubmit={handleSubmit} className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">Nombre</label>
-                                    <input
-                                        type="text"
-                                        name="nombre"
-                                        value={formData.nombre || ''}
-                                        onChange={handleInputChange}
-                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">Email</label>
-                                    <input
-                                        type="email"
-                                        name="email"
-                                        value={formData.email || ''}
-                                        onChange={handleInputChange}
-                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">Dirección</label>
-                                    <input
-                                        type="text"
-                                        name="direccion"
-                                        value={formData.direccion || ''}
-                                        onChange={handleInputChange}
-                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">Teléfono</label>
-                                    <input
-                                        type="tel"
-                                        name="telefono"
-                                        value={formData.telefono || ''}
-                                        onChange={handleInputChange}
-                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                    />
-                                </div>
-                                <div className="flex justify-end space-x-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsEditing(false)}
-                                        className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
-                                    >
-                                        Cancelar
-                                    </button>
-                                    <button
-                                        type="submit"
-                                        className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
-                                    >
-                                        Guardar Cambios
-                                    </button>
-                                </div>
-                            </form>
-                        ) : (
-                            <div className="space-y-4">
-                                <div>
-                                    <h3 className="text-lg font-medium text-gray-900">Información Personal</h3>
-                                    <dl className="mt-2 divide-y divide-gray-200">
-                                        <div className="py-3 flex justify-between">
-                                            <dt className="text-sm font-medium text-gray-500">Nombre</dt>
-                                            <dd className="text-sm text-gray-900">{profile?.nombre}</dd>
-                                        </div>
-                                        <div className="py-3 flex justify-between">
-                                            <dt className="text-sm font-medium text-gray-500">Email</dt>
-                                            <dd className="text-sm text-gray-900">{profile?.email}</dd>
-                                        </div>
-                                        <div className="py-3 flex justify-between">
-                                            <dt className="text-sm font-medium text-gray-500">Dirección</dt>
-                                            <dd className="text-sm text-gray-900">{profile?.direccion || '-'}</dd>
-                                        </div>
-                                        <div className="py-3 flex justify-between">
-                                            <dt className="text-sm font-medium text-gray-500">Teléfono</dt>
-                                            <dd className="text-sm text-gray-900">{profile?.telefono || '-'}</dd>
-                                        </div>
-                                        <div className="py-3 flex justify-between">
-                                            <dt className="text-sm font-medium text-gray-500">Tipo de Usuario</dt>
-                                            <dd className="text-sm text-gray-900">{profile?.role}</dd>
-                                        </div>
-                                        <div className="py-3 flex justify-between">
-                                            <dt className="text-sm font-medium text-gray-500">Fecha de Registro</dt>
-                                            <dd className="text-sm text-gray-900">
-                                                {new Date(profile?.fecha_registro || '').toLocaleDateString()}
-                                            </dd>
-                                        </div>
-                                        {profile?.ultima_compra && (
-                                            <div className="py-3 flex justify-between">
-                                                <dt className="text-sm font-medium text-gray-500">Última Compra</dt>
-                                                <dd className="text-sm text-gray-900">
-                                                    {new Date(profile.ultima_compra).toLocaleDateString()}
-                                                </dd>
-                                            </div>
-                                        )}
-                                    </dl>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            </div>
+  return (
+    <div className="max-w-2xl mx-auto py-10 px-4">
+      <div className="bg-white rounded-2xl shadow-lg p-8 flex flex-col items-center">
+        {/* Avatar y resumen */}
+        <div className="flex flex-col items-center mb-6 w-full">
+          <div className="w-24 h-24 rounded-full bg-blue-100 flex items-center justify-center mb-3 border-4 border-blue-200">
+            <UserIcon className="w-16 h-16 text-blue-500" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-1">{user.nombre_completo}</h2>
+          <div className="text-gray-500 mb-1">{user.correo}</div>
+          <span className="inline-block bg-blue-50 text-blue-700 text-xs px-3 py-1 rounded-full font-semibold mb-2 uppercase tracking-wide">{user.rol}</span>
         </div>
-    );
+
+        {/* Formulario de edición */}
+        <form onSubmit={handleGuardar} className="w-full flex flex-col gap-4 mt-2">
+          <div>
+            <label className="block text-gray-700 font-medium mb-1">Nombre completo</label>
+            <input type="text" className="mt-1 w-full border rounded px-3 py-2" value={editando ? nombre : user.nombre_completo} onChange={e => setNombre(e.target.value)} disabled={!editando} />
+          </div>
+          <div>
+            <label className="block text-gray-700 font-medium mb-1">Correo</label>
+            <input type="email" className="mt-1 w-full border rounded px-3 py-2" value={editando ? correo : user.correo} onChange={e => setCorreo(e.target.value)} disabled={!editando} />
+          </div>
+          <div>
+            <label className="block text-gray-700 font-medium mb-1">Contraseña</label>
+            <input type="password" className="mt-1 w-full border rounded px-3 py-2" value={contrasena} onChange={e => setContrasena(e.target.value)} disabled={!editando} placeholder="••••••••" />
+            <span className="text-xs text-gray-400">Deja en blanco para no cambiarla</span>
+          </div>
+          <div className="flex gap-2 justify-end mt-2">
+            {!editando ? (
+              <button type="button" className="bg-blue-600 text-white px-6 py-2 rounded shadow hover:bg-blue-700 transition" onClick={() => setEditando(true)}>Editar perfil</button>
+            ) : (
+              <>
+                <button type="submit" className="bg-green-600 text-white px-6 py-2 rounded shadow hover:bg-green-700 transition">Guardar cambios</button>
+                <button type="button" className="bg-gray-300 px-6 py-2 rounded shadow hover:bg-gray-400 transition" onClick={() => setEditando(false)}>Cancelar</button>
+              </>
+            )}
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 };
 
-export default PerfilPage; 
+export default Perfil; 
