@@ -125,23 +125,10 @@ const Checkout: React.FC = () => {
           const transbankResult = await transbankService.crearTransaccion(transbankData);
           console.log('✅ Transacción Transbank creada:', transbankResult);
           
-          toast.success('Redirigiendo a Transbank...');
+          toast.success('Redirigiendo al simulador de Transbank...');
           
-          // En producción, aquí redirigirías a la URL real de Transbank
-          // Por ahora simulamos el proceso
-          setTimeout(async () => {
-            try {
-              // Simular confirmación de pago
-              await transbankService.confirmarPago({
-                token: transbankResult.transaccion.token,
-                id_pedido: pedidoResult.id_pedido
-              });
-              navigate(`/payment-success?order_id=${pedidoResult.id_pedido}`);
-            } catch (error) {
-              console.error('Error al confirmar pago:', error);
-              toast.error('Error al confirmar el pago');
-            }
-          }, 2000);
+          // Redirigir al simulador de Transbank
+          navigate(`/transbank-simulator?order_id=${pedidoResult.id_pedido}&amount=${getCartTotal()}&return_url=${encodeURIComponent(`${window.location.origin}/payment-success`)}`);
           
         } catch (error) {
           console.error('❌ Error con Transbank:', error);

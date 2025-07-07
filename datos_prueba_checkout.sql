@@ -1,0 +1,45 @@
+-- =====================================================
+-- DATOS DE PRUEBA PARA DIAGNOSTICAR CHECKOUT
+-- =====================================================
+
+-- Limpiar datos existentes (opcional)
+-- DELETE FROM CARRITO_PRODUCTOS;
+-- DELETE FROM CARRITOS;
+-- DELETE FROM PAGOS;
+-- DELETE FROM PEDIDOS;
+-- DELETE FROM DETALLE_PEDIDO;
+
+-- Insertar carrito de prueba
+INSERT INTO CARRITOS (ID_CARRITO, FECHA_CREACION) VALUES (2, SYSDATE);
+
+-- Insertar productos en el carrito
+INSERT INTO CARRITO_PRODUCTOS (ID_CARRITO, ID_PRODUCTO, ID_SUCURSAL, CANTIDAD, VALOR_UNITARIO, VALOR_TOTAL) 
+VALUES (2, 1, 1, 2, 15490, 30980);
+
+-- Verificar que se insertaron correctamente
+SELECT 'CARRITOS' as tabla, COUNT(*) as total FROM CARRITOS;
+SELECT 'CARRITO_PRODUCTOS' as tabla, COUNT(*) as total FROM CARRITO_PRODUCTOS WHERE ID_CARRITO = 2;
+
+-- Mostrar datos del carrito 2
+SELECT 
+    cp.ID_CARRITO,
+    cp.ID_PRODUCTO,
+    p.NOMBRE,
+    cp.CANTIDAD,
+    cp.VALOR_UNITARIO,
+    cp.VALOR_TOTAL
+FROM CARRITO_PRODUCTOS cp
+JOIN PRODUCTOS p ON cp.ID_PRODUCTO = p.ID_PRODUCTO
+WHERE cp.ID_CARRITO = 2;
+
+-- Verificar usuario 61
+SELECT ID_USUARIO, NOMBRE_COMPLETO, ROL FROM USUARIOS WHERE ID_USUARIO = 61;
+
+-- Mostrar estructura de tablas
+DESC CARRITOS;
+DESC CARRITO_PRODUCTOS;
+DESC DETALLE_PEDIDO;
+DESC PEDIDOS;
+DESC PAGOS;
+
+COMMIT; 

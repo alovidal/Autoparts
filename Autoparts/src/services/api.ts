@@ -20,9 +20,17 @@ import {
 
 // Configuración base de axios
 const API_BASE_URL = 'http://localhost:5000'; // Puerto por defecto de Flask
+const TRANSBANK_API_URL = 'http://localhost:5001'; // Puerto de API Transbank
 
 const api = axios.create({
   baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+const transbankApi = axios.create({
+  baseURL: TRANSBANK_API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -188,6 +196,11 @@ export const carritoService = {
     return response.data;
   },
 
+  actualizarCantidad: async (idCarrito: number, idProducto: number, cantidad: number): Promise<{ mensaje: string }> => {
+    const response = await api.put(`/carritos/${idCarrito}/productos/${idProducto}/cantidad`, { cantidad });
+    return response.data;
+  },
+
   vaciarCarrito: async (idCarrito: number): Promise<{ mensaje: string }> => {
     const response = await api.delete(`/carritos/${idCarrito}/vaciar`);
     return response.data;
@@ -302,7 +315,7 @@ export const transbankService = {
     };
     mensaje: string;
   }> => {
-    const response = await api.post('/transbank/crear-transaccion', data);
+    const response = await transbankApi.post('/transbank/crear-transaccion', data);
     return response.data;
   },
 
@@ -314,7 +327,22 @@ export const transbankService = {
     mensaje: string;
     id_pedido: number;
   }> => {
-    const response = await api.post('/transbank/confirmar-pago', data);
+    const response = await transbankApi.post('/transbank/confirmar-pago', data);
+    return response.data;
+  },
+
+  obtenerEstadisticas: async (): Promise<any> => {
+    const response = await transbankApi.get('/transbank/estadisticas');
+    return response.data;
+  },
+
+  simularPago: async (data: { id_pedido: number; escenario?: string }): Promise<any> => {
+    const response = await transbankApi.post('/transbank/simular-pago', data);
+    return response.data;
+  },
+
+  healthCheck: async (): Promise<any> => {
+    const response = await transbankApi.get('/transbank/health');
     return response.data;
   },
 };

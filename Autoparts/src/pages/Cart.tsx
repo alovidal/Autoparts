@@ -6,14 +6,14 @@ import { TrashIcon, PlusIcon, MinusIcon, ArrowLeftIcon, ShoppingBagIcon } from '
 import toast from 'react-hot-toast';
 
 const Cart: React.FC = () => {
-  const { cartItems, loading, removeFromCart, getCartTotal, getCartItemCount, refreshCart } = useCart();
+  const { cartItems, loading, removeFromCart, updateQuantity, getCartTotal, getCartItemCount, refreshCart } = useCart();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [updating, setUpdating] = useState<number | null>(null);
+  const [quantityUpdating, setQuantityUpdating] = useState<number | null>(null);
 
-  useEffect(() => {
-    refreshCart();
-  }, [refreshCart]);
+  // No necesitamos este useEffect porque el contexto ya carga el carrito automáticamente
+  // cuando se establece el cartId
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('es-CL', {
@@ -31,6 +31,29 @@ const Cart: React.FC = () => {
       toast.error('Error al eliminar el producto');
     } finally {
       setUpdating(null);
+    }
+  };
+
+  const handleQuantityChange = async (productId: number, newQuantity: number) => {
+    if (newQuantity <= 0) return;
+    
+    setQuantityUpdating(productId);
+    try {
+      await updateQuantity(productId, newQuantity);
+    } catch (error) {
+      // El error ya se maneja en el contexto
+    } finally {
+      setQuantityUpdating(null);
+    }
+  };
+
+  const handleQuantityIncrement = async (productId: number, currentQuantity: number) => {
+    await handleQuantityChange(productId, currentQuantity + 1);
+  };
+
+  const handleQuantityDecrement = async (productId: number, currentQuantity: number) => {
+    if (currentQuantity > 1) {
+      await handleQuantityChange(productId, currentQuantity - 1);
     }
   };
 
@@ -95,37 +118,63 @@ const Cart: React.FC = () => {
                   <h2 className="text-lg font-medium text-gray-900 mb-4">Productos</h2>
                   <div className="space-y-4">
                     {cartItems.map((item) => (
-                      <div key={item.id_producto} className="flex items-center space-x-4 p-4 border border-gray-200 rounded-lg">
+                      <div key={item.id_producto} className="flex items-center space-x-4 p-6 border border-gray-200 rounded-lg hover:shadow-md transition-shadow">
                         {/* Imagen */}
                         <div className="flex-shrink-0">
                           <img
-                            src={item.imagen}
+                            src={item.imagen || '/img/productos/default.jpg'}
                             alt={item.nombre}
-                            className="w-16 h-16 object-cover rounded-md"
-                            onError={e => { e.currentTarget.src = '/img/productos/default.jpg'; }}
+                            className="w-20 h-20 object-cover rounded-md"
+                            onError={e => { 
+                              e.currentTarget.src = '/img/productos/default.jpg'; 
+                            }}
                           />
                         </div>
 
                         {/* Información del producto */}
                         <div className="flex-1 min-w-0">
-                          <h3 className="text-sm font-medium text-gray-900 truncate">
+                          <h3 className="text-base font-semibold text-gray-900 truncate">
                             {item.nombre}
                           </h3>
-                          <p className="text-sm text-gray-500">{item.marca}</p>
+                          <p className="text-sm text-gray-600 font-medium">{item.marca}</p>
                           <p className="text-sm text-gray-500">Sucursal: {item.sucursal_nombre}</p>
                         </div>
 
                         {/* Cantidad y precio */}
                         <div className="flex items-center space-x-4">
-                          <div className="text-sm text-gray-900">
-                            <span className="font-medium">Cantidad: {item.cantidad}</span>
+                          {/* Controles de cantidad */}
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => handleQuantityDecrement(item.id_producto, item.cantidad)}
+                              disabled={quantityUpdating === item.id_producto || item.cantidad <= 1}
+                              className="p-1 rounded-full bg-gray-100 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <MinusIcon className="h-4 w-4 text-gray-600" />
+                            </button>
+                            
+                            <span className="text-sm font-medium text-gray-900 min-w-[2rem] text-center">
+                              {quantityUpdating === item.id_producto ? (
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mx-auto"></div>
+                              ) : (
+                                item.cantidad
+                              )}
+                            </span>
+                            
+                            <button
+                              onClick={() => handleQuantityIncrement(item.id_producto, item.cantidad)}
+                              disabled={quantityUpdating === item.id_producto}
+                              className="p-1 rounded-full bg-gray-100 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <PlusIcon className="h-4 w-4 text-gray-600" />
+                            </button>
                           </div>
+                          
                           <div className="text-right">
-                            <p className="text-sm font-medium text-gray-900">
-                              {formatPrice(item.valor_unitario)}
-                            </p>
                             <p className="text-sm text-gray-500">
-                              Total: {formatPrice(item.valor_total)}
+                              {formatPrice(item.valor_unitario)} c/u
+                            </p>
+                            <p className="text-base font-semibold text-gray-900">
+                              {formatPrice(item.valor_total)}
                             </p>
                           </div>
                         </div>

@@ -665,6 +665,52 @@ def eliminar_producto_carrito(id_carrito, id_producto):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/carritos/<int:id_carrito>/productos/<int:id_producto>/cantidad', methods=['PUT'])
+def actualizar_cantidad_carrito(id_carrito, id_producto):
+    try:
+        data = request.get_json()
+        nueva_cantidad = data.get('cantidad')
+        
+        print(f"🔄 Actualizando cantidad: Carrito {id_carrito}, Producto {id_producto}, Nueva cantidad: {nueva_cantidad}")
+        
+        if not nueva_cantidad or nueva_cantidad <= 0:
+            return jsonify({'error': 'La cantidad debe ser mayor a 0'}), 400
+        
+        cursor = connection.cursor()
+        
+        # Verificar stock disponible
+        cursor.execute("""
+            SELECT i.STOCK 
+            FROM INVENTARIO i 
+            JOIN CARRITO_PRODUCTOS cp ON i.ID_PRODUCTO = cp.ID_PRODUCTO AND i.ID_SUCURSAL = cp.ID_SUCURSAL
+            WHERE cp.ID_CARRITO = :id_carrito AND cp.ID_PRODUCTO = :id_producto
+        """, id_carrito=id_carrito, id_producto=id_producto)
+        
+        stock_disponible = cursor.fetchone()
+        print(f"📦 Stock disponible: {stock_disponible}")
+        
+        if not stock_disponible:
+            return jsonify({'error': 'Producto no encontrado en inventario'}), 400
+        
+        if stock_disponible[0] < nueva_cantidad:
+            return jsonify({'error': f'No hay suficiente stock disponible. Stock actual: {stock_disponible[0]}'}), 400
+        
+        # Actualizar cantidad y recalcular valor total
+        cursor.execute("""
+            UPDATE CARRITO_PRODUCTOS 
+            SET CANTIDAD = :cantidad, 
+                VALOR_TOTAL = CANTIDAD * VALOR_UNITARIO 
+            WHERE ID_CARRITO = :id_carrito AND ID_PRODUCTO = :id_producto
+        """, cantidad=nueva_cantidad, id_carrito=id_carrito, id_producto=id_producto)
+        
+        connection.commit()
+        cursor.close()
+        
+        return jsonify({'mensaje': 'Cantidad actualizada correctamente'})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/carritos/<int:id_carrito>/productos', methods=['GET'])
 def listar_productos_carrito(id_carrito):
     try:
@@ -712,65 +758,98 @@ def crear_pedido():
         id_carrito = data.get('id_carrito')
         direccion = data.get('direccion')
         metodo_pago = data.get('metodo_pago', 'TRANSBANK')
-        monto_total = data.get('monto_total')
+        monto_total = data.get('monto_total', 0)
+        
+        print(f"📦 Creando pedido: {data}")
         
         if not all([id_usuario, id_carrito, direccion]):
-            return jsonify({'error': 'Faltan datos requeridos'}), 400
-            
+            return jsonify({'error': 'Faltan datos requeridos: id_usuario, id_carrito, direccion'}), 400
+        
         cursor = connection.cursor()
         
-        # Verificar que el carrito existe y tiene productos
+        # Verificar que el carrito existe en la tabla CARRITOS
+        cursor.execute("SELECT COUNT(*) FROM CARRITOS WHERE ID_CARRITO = :id_carrito", id_carrito=id_carrito)
+        carrito_exists = cursor.fetchone()[0]
+        
+        if carrito_exists == 0:
+            print(f"❌ Carrito {id_carrito} no existe en tabla CARRITOS")
+            return jsonify({'error': f'Carrito {id_carrito} no encontrado'}), 400
+        
+        # Verificar que el carrito tiene productos
         cursor.execute("""
-            SELECT COUNT(*) FROM CARRITO_PRODUCTOS 
-            WHERE ID_CARRITO = :id_carrito
+            SELECT COUNT(*) FROM CARRITO_PRODUCTOS WHERE ID_CARRITO = :id_carrito
         """, id_carrito=id_carrito)
         
-        if cursor.fetchone()[0] == 0:
+        productos_count = cursor.fetchone()[0]
+        print(f"📦 Productos en carrito {id_carrito}: {productos_count}")
+        
+        if productos_count == 0:
             return jsonify({'error': 'El carrito está vacío'}), 400
         
-        # Obtener el siguiente ID de detalle
+        # Verificar que el usuario existe
+        cursor.execute("SELECT COUNT(*) FROM USUARIOS WHERE ID_USUARIO = :id_usuario", id_usuario=id_usuario)
+        usuario_exists = cursor.fetchone()[0]
+        
+        if usuario_exists == 0:
+            return jsonify({'error': 'Usuario no encontrado'}), 400
+        
+        # Obtener el siguiente ID para DETALLE_PEDIDO
         cursor.execute("SELECT NVL(MAX(ID_DETALLE), 0) + 1 FROM DETALLE_PEDIDO")
-        id_detalle = cursor.fetchone()[0]
+        next_id = cursor.fetchone()[0]
+        
+        # Obtener el siguiente ID para PEDIDOS
+        cursor.execute("SELECT NVL(MAX(ID_PEDIDO), 0) + 1 FROM PEDIDOS")
+        next_pedido_id = cursor.fetchone()[0]
         
         # Crear detalle de pedido
         cursor.execute("""
-            INSERT INTO DETALLE_PEDIDO (ID_DETALLE, ID_CARRITO, DIRECCION, ID_USUARIO, ESTADO, METODO_PAGO)
-            VALUES (:id_detalle, :id_carrito, :direccion, :id_usuario, 'PENDIENTE', :metodo_pago)
-        """, id_detalle=id_detalle, id_carrito=id_carrito, direccion=direccion, 
-             id_usuario=id_usuario, metodo_pago=metodo_pago)
+            INSERT INTO DETALLE_PEDIDO (ID_DETALLE, ID_CARRITO, DIRECCION, ID_USUARIO, ESTADO) 
+            VALUES (:id_detalle, :id_carrito, :direccion, :id_usuario, 'PENDIENTE')
+        """, id_detalle=next_id, id_carrito=id_carrito, direccion=direccion, id_usuario=id_usuario)
         
-        # Obtener el siguiente ID de pedido
-        cursor.execute("SELECT NVL(MAX(ID_PEDIDO), 0) + 1 FROM PEDIDOS")
-        id_pedido = cursor.fetchone()[0]
+        print(f"✅ Detalle de pedido creado: {next_id}")
         
         # Crear pedido
         cursor.execute("""
-            INSERT INTO PEDIDOS (ID_PEDIDO, ID_USUARIO, ID_DETALLE, FECHA_PEDIDO)
+            INSERT INTO PEDIDOS (ID_PEDIDO, ID_USUARIO, ID_DETALLE, FECHA_PEDIDO) 
             VALUES (:id_pedido, :id_usuario, :id_detalle, SYSDATE)
-        """, id_pedido=id_pedido, id_usuario=id_usuario, id_detalle=id_detalle)
+        """, id_pedido=next_pedido_id, id_usuario=id_usuario, id_detalle=next_id)
         
-        # Si se proporciona monto_total, crear el pago
-        if monto_total:
-            cursor.execute("SELECT NVL(MAX(ID_PAGO), 0) + 1 FROM PAGOS")
-            id_pago = cursor.fetchone()[0]
-            
-            cursor.execute("""
-                INSERT INTO PAGOS (ID_PAGO, ID_PEDIDO, MONTO_TOTAL, METODO_PAGO, ESTADO_PAGO, FECHA_PAGO)
-                VALUES (:id_pago, :id_pedido, :monto_total, :metodo_pago, 'PENDIENTE', SYSDATE)
-            """, id_pago=id_pago, id_pedido=id_pedido, monto_total=monto_total, metodo_pago=metodo_pago)
+        id_pedido = next_pedido_id
+        print(f"✅ Pedido creado: {id_pedido}")
+        
+        # Crear pago asociado (usando WEBPAY como método por defecto ya que TRANSBANK no está en las restricciones)
+        metodo_pago_db = 'WEBPAY' if metodo_pago == 'TRANSBANK' else metodo_pago
+        cursor.execute("""
+            INSERT INTO PAGOS (ID_PEDIDO, MONTO_TOTAL, METODO_PAGO, ESTADO_PAGO) 
+            VALUES (:id_pedido, :monto_total, :metodo_pago, 'PENDIENTE')
+        """, id_pedido=id_pedido, monto_total=monto_total, metodo_pago=metodo_pago_db)
+        
+        print(f"✅ Pago registrado para pedido: {id_pedido}")
+        
+        # Registrar en bitácora
+        cursor.execute("""
+            INSERT INTO BITACORA (ID_USUARIO, ACCION, FECHA_ACCION)
+            VALUES (:id_usuario, 'Pedido creado #' || :id_pedido, SYSDATE)
+        """, id_usuario=id_usuario, id_pedido=id_pedido)
         
         connection.commit()
         cursor.close()
         
+        print(f"🎉 Pedido {id_pedido} creado exitosamente")
+        
         return jsonify({
-            'id_pedido': id_pedido,
-            'id_detalle': id_detalle,
-            'mensaje': 'Pedido creado correctamente'
+            'id_pedido': id_pedido, 
+            'mensaje': 'Pedido creado correctamente',
+            'detalle_id': next_id
         })
         
     except Exception as e:
-        print(f"Error al crear pedido: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        print(f"❌ Error al crear pedido: {str(e)}")
+        print(f"📋 Traceback completo:")
+        traceback.print_exc()
+        return jsonify({'error': f'Error al crear el pedido: {str(e)}'}), 500
 
 @app.route('/pedidos', methods=['GET'])
 def listar_pedidos():
@@ -788,71 +867,15 @@ def listar_pedidos():
 def obtener_pedido(id_pedido):
     try:
         cursor = connection.cursor()
-        
-        # Obtener información básica del pedido
-        cursor.execute("""
-            SELECT 
-                p.ID_PEDIDO, 
-                p.ID_USUARIO, 
-                p.FECHA_PEDIDO, 
-                p.ID_DETALLE,
-                d.DIRECCION,
-                d.ESTADO,
-                d.METODO_PAGO,
-                COALESCE(pg.MONTO_TOTAL, 0) as TOTAL
-            FROM PEDIDOS p
-            JOIN DETALLE_PEDIDO d ON p.ID_DETALLE = d.ID_DETALLE
-            LEFT JOIN PAGOS pg ON p.ID_PEDIDO = pg.ID_PEDIDO
-            WHERE p.ID_PEDIDO = :id_pedido
-        """, id_pedido=id_pedido)
-        
+        cursor.execute("SELECT ID_PEDIDO, ID_USUARIO, FECHA_PEDIDO, ID_DETALLE FROM PEDIDOS WHERE ID_PEDIDO = :id_pedido", id_pedido=id_pedido)
         row = cursor.fetchone()
-        if not row:
-            cursor.close()
-            return jsonify({'error': 'Pedido no encontrado'}), 404
-        
-        # Obtener productos del pedido
-        cursor.execute("""
-            SELECT 
-                p.NOMBRE,
-                cp.CANTIDAD,
-                cp.VALOR_UNITARIO,
-                (cp.CANTIDAD * cp.VALOR_UNITARIO) as VALOR_TOTAL
-            FROM CARRITO_PRODUCTOS cp
-            JOIN PRODUCTOS p ON cp.ID_PRODUCTO = p.ID_PRODUCTO
-            JOIN DETALLE_PEDIDO d ON cp.ID_CARRITO = d.ID_CARRITO
-            JOIN PEDIDOS ped ON d.ID_DETALLE = ped.ID_DETALLE
-            WHERE ped.ID_PEDIDO = :id_pedido
-        """, id_pedido=id_pedido)
-        
-        productos = []
-        for prod_row in cursor.fetchall():
-            productos.append({
-                'nombre': prod_row[0],
-                'cantidad': prod_row[1],
-                'valor_unitario': prod_row[2],
-                'valor_total': prod_row[3]
-            })
-        
         cursor.close()
-        
-        # Construir respuesta
-        pedido_info = {
-            'id_pedido': row[0],
-            'id_usuario': row[1],
-            'fecha_pedido': row[2].isoformat() if row[2] else None,
-            'id_detalle': row[3],
-            'direccion': row[4],
-            'estado': row[5],
-            'metodo_pago': row[6],
-            'total': float(row[7]) if row[7] else 0,
-            'productos': productos
-        }
-        
-        return jsonify(pedido_info)
-        
+        if row:
+            columns = ['id_pedido', 'id_usuario', 'fecha_pedido', 'id_detalle']
+            return jsonify(dict(zip(columns, row)))
+        else:
+            return jsonify({'error': 'Pedido no encontrado'}), 404
     except Exception as e:
-        print(f"Error al obtener pedido: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/usuarios/<int:id_usuario>/pedidos', methods=['GET'])
@@ -974,97 +997,7 @@ def actualizar_pago(id_pago):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ------------------- TRANSBANK -------------------
-@app.route('/transbank/crear-transaccion', methods=['POST'])
-def crear_transaccion_transbank():
-    try:
-        data = request.get_json()
-        id_pedido = data.get('id_pedido')
-        monto = data.get('monto')
-        return_url = data.get('return_url')
-        session_id = data.get('session_id')
-        buy_order = data.get('buy_order')
-        
-        if not all([id_pedido, monto, return_url, session_id, buy_order]):
-            return jsonify({'error': 'Faltan datos requeridos'}), 400
-        
-        # Simular creación de transacción en Transbank
-        # En producción, aquí iría la integración real con Transbank
-        transaccion_data = {
-            'id_pedido': id_pedido,
-            'monto': monto,
-            'return_url': return_url,
-            'session_id': session_id,
-            'buy_order': buy_order,
-            'token': f"token_{session_id}_{id_pedido}",
-            'url_pago': f"https://webpay3gint.transbank.cl/webpayserver/initTransaction?token={session_id}_{id_pedido}",
-            'estado': 'PENDIENTE'
-        }
-        
-        # Actualizar estado del pago
-        cursor = connection.cursor()
-        cursor.execute("""
-            UPDATE PAGOS 
-            SET ESTADO_PAGO = 'PROCESANDO', 
-                FECHA_PAGO = SYSDATE 
-            WHERE ID_PEDIDO = :id_pedido
-        """, id_pedido=id_pedido)
-        connection.commit()
-        cursor.close()
-        
-        return jsonify({
-            'success': True,
-            'transaccion': transaccion_data,
-            'mensaje': 'Transacción creada exitosamente'
-        })
-        
-    except Exception as e:
-        print(f"Error al crear transacción Transbank: {str(e)}")
-        return jsonify({'error': str(e)}), 500
 
-@app.route('/transbank/confirmar-pago', methods=['POST'])
-def confirmar_pago_transbank():
-    try:
-        data = request.get_json()
-        token = data.get('token')
-        id_pedido = data.get('id_pedido')
-        
-        if not all([token, id_pedido]):
-            return jsonify({'error': 'Faltan datos requeridos'}), 400
-        
-        # Simular confirmación de pago
-        # En producción, aquí se validaría con Transbank
-        cursor = connection.cursor()
-        
-        # Actualizar estado del pago
-        cursor.execute("""
-            UPDATE PAGOS 
-            SET ESTADO_PAGO = 'APROBADO', 
-                FECHA_PAGO = SYSDATE 
-            WHERE ID_PEDIDO = :id_pedido
-        """, id_pedido=id_pedido)
-        
-        # Actualizar estado del pedido
-        cursor.execute("""
-            UPDATE DETALLE_PEDIDO 
-            SET ESTADO = 'CONFIRMADO' 
-            WHERE ID_DETALLE = (
-                SELECT ID_DETALLE FROM PEDIDOS WHERE ID_PEDIDO = :id_pedido
-            )
-        """, id_pedido=id_pedido)
-        
-        connection.commit()
-        cursor.close()
-        
-        return jsonify({
-            'success': True,
-            'mensaje': 'Pago confirmado exitosamente',
-            'id_pedido': id_pedido
-        })
-        
-    except Exception as e:
-        print(f"Error al confirmar pago: {str(e)}")
-        return jsonify({'error': str(e)}), 500
 
 # ------------------- BITÁCORA -------------------
 @app.route('/bitacora', methods=['GET'])
@@ -1080,6 +1013,41 @@ def listar_bitacora():
         logs = [dict(zip(columns, row)) for row in cursor.fetchall()]
         cursor.close()
         return jsonify({'bitacora': logs})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ------------------- DIAGNÓSTICO -------------------
+@app.route('/diagnostico/carritos', methods=['GET'])
+def diagnostico_carritos():
+    """Endpoint para diagnosticar el estado de los carritos"""
+    try:
+        cursor = connection.cursor()
+        
+        # Verificar carritos
+        cursor.execute("SELECT ID_CARRITO, FECHA_CREACION FROM CARRITOS ORDER BY ID_CARRITO")
+        carritos = cursor.fetchall()
+        
+        # Verificar productos en carritos
+        cursor.execute("""
+            SELECT ID_CARRITO, COUNT(*) as productos 
+            FROM CARRITO_PRODUCTOS 
+            GROUP BY ID_CARRITO 
+            ORDER BY ID_CARRITO
+        """)
+        productos_carrito = cursor.fetchall()
+        
+        # Verificar usuarios
+        cursor.execute("SELECT ID_USUARIO, NOMBRE_COMPLETO FROM USUARIOS ORDER BY ID_USUARIO")
+        usuarios = cursor.fetchall()
+        
+        cursor.close()
+        
+        return jsonify({
+            'carritos': [{'id': row[0], 'fecha': str(row[1])} for row in carritos],
+            'productos_por_carrito': [{'carrito': row[0], 'productos': row[1]} for row in productos_carrito],
+            'usuarios': [{'id': row[0], 'nombre': row[1]} for row in usuarios]
+        })
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

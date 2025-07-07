@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { ProductoCarrito, AgregarAlCarritoRequest } from '../types';
 import { carritoService, productoService } from '../services/api';
 import toast from 'react-hot-toast';
@@ -9,6 +9,7 @@ interface CartContextType {
   loading: boolean;
   addToCart: (data: AgregarAlCarritoRequest) => Promise<boolean>;
   removeFromCart: (productId: number) => Promise<boolean>;
+  updateQuantity: (productId: number, cantidad: number) => Promise<boolean>;
   clearCart: () => Promise<boolean>;
   getCartTotal: () => number;
   getCartItemCount: () => number;
@@ -45,7 +46,22 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
   useEffect(() => {
     // Cargar productos del carrito cuando cambie el cartId
     if (cartId) {
-      refreshCart();
+      const loadCart = async () => {
+        try {
+          setLoading(true);
+          const { productos } = await carritoService.obtenerProductos(cartId);
+          setCartItems(productos);
+        } catch (error) {
+          console.error('Error al cargar carrito:', error);
+          toast.error('Error al cargar el carrito');
+        } finally {
+          setLoading(false);
+        }
+      };
+      loadCart();
+    } else {
+      // Si no hay cartId, limpiar los items
+      setCartItems([]);
     }
   }, [cartId]);
 
@@ -61,7 +77,7 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
     }
   };
 
-  const refreshCart = async (): Promise<void> => {
+  const refreshCart = useCallback(async (): Promise<void> => {
     if (!cartId) return;
 
     try {
@@ -74,9 +90,9 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [cartId]);
 
-  const addToCart = async (data: AgregarAlCarritoRequest): Promise<boolean> => {
+  const addToCart = useCallback(async (data: AgregarAlCarritoRequest): Promise<boolean> => {
     try {
       setLoading(true);
       let currentCartId = cartId;
@@ -101,9 +117,9 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [cartId, refreshCart]);
 
-  const removeFromCart = async (productId: number): Promise<boolean> => {
+  const removeFromCart = useCallback(async (productId: number): Promise<boolean> => {
     if (!cartId) return false;
 
     try {
@@ -119,9 +135,27 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [cartId, refreshCart]);
 
-  const clearCart = async (): Promise<boolean> => {
+  const updateQuantity = useCallback(async (productId: number, cantidad: number): Promise<boolean> => {
+    if (!cartId) return false;
+
+    try {
+      setLoading(true);
+      await carritoService.actualizarCantidad(cartId, productId, cantidad);
+      await refreshCart();
+      toast.success('Cantidad actualizada');
+      return true;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || 'Error al actualizar cantidad';
+      toast.error(errorMessage);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [cartId, refreshCart]);
+
+  const clearCart = useCallback(async (): Promise<boolean> => {
     if (!cartId) return false;
 
     try {
@@ -137,15 +171,15 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [cartId]);
 
-  const getCartTotal = (): number => {
+  const getCartTotal = useCallback((): number => {
     return cartItems.reduce((total, item) => total + item.valor_total, 0);
-  };
+  }, [cartItems]);
 
-  const getCartItemCount = (): number => {
+  const getCartItemCount = useCallback((): number => {
     return cartItems.reduce((count, item) => count + item.cantidad, 0);
-  };
+  }, [cartItems]);
 
   const value: CartContextType = {
     cartId,
@@ -153,6 +187,7 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
     loading,
     addToCart,
     removeFromCart,
+    updateQuantity,
     clearCart,
     getCartTotal,
     getCartItemCount,
