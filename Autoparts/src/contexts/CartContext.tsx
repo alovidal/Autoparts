@@ -67,26 +67,7 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
     try {
       setLoading(true);
       const { productos } = await carritoService.obtenerProductos(cartId);
-      
-      // Enriquecer los productos con información adicional
-      const enrichedProducts = await Promise.all(
-        productos.map(async (item) => {
-          try {
-            const productoInfo = await productoService.obtenerProducto(item.id_producto);
-            return {
-              ...item,
-              nombre: productoInfo.nombre,
-              marca: productoInfo.marca,
-              imagen: productoInfo.imagen,
-            };
-          } catch (error) {
-            console.error(`Error al obtener información del producto ${item.id_producto}:`, error);
-            return item;
-          }
-        })
-      );
-      
-      setCartItems(enrichedProducts);
+      setCartItems(productos);
     } catch (error) {
       console.error('Error al cargar carrito:', error);
       toast.error('Error al cargar el carrito');
@@ -98,21 +79,22 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
   const addToCart = async (data: AgregarAlCarritoRequest): Promise<boolean> => {
     try {
       setLoading(true);
-      
       let currentCartId = cartId;
       if (!currentCartId) {
         currentCartId = await createCart();
       }
+      console.log('🛒 Agregando producto al carrito:', data, 'Carrito ID:', currentCartId);
 
       await carritoService.agregarProducto(currentCartId, {
         ...data,
         id_carrito: currentCartId,
       });
 
+      console.log('✅ Producto agregado exitosamente');
       await refreshCart();
-      toast.success('Producto agregado al carrito');
       return true;
     } catch (error: any) {
+      console.error('❌ Error en addToCart:', error);
       const errorMessage = error.response?.data?.error || 'Error al agregar al carrito';
       toast.error(errorMessage);
       return false;
@@ -182,4 +164,4 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
       {children}
     </CartContext.Provider>
   );
-}; 
+};

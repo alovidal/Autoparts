@@ -503,6 +503,70 @@ def rebajar_stock():
     cursor.close()
     return jsonify({'mensaje': 'Stock rebajado correctamente'})
 
+@app.route('/inventario/detalle', methods=['GET'])
+def inventario_detallado():
+    try:
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT 
+                p.ID_PRODUCTO,
+                p.NOMBRE,
+                p.MARCA,
+                p.DESCRIPCION,
+                p.CODIGO_INTERNO,
+                p.CODIGO_FABRICANTE,
+                p.IMAGEN,
+                p.PRECIO_UNITARIO,
+                p.ID_CATEGORIA,
+                i.STOCK,
+                s.NOMBRE as SUCURSAL_NOMBRE,
+                s.ID_SUCURSAL
+            FROM INVENTARIO i
+            JOIN PRODUCTOS p ON i.ID_PRODUCTO = p.ID_PRODUCTO
+            JOIN SUCURSALES s ON i.ID_SUCURSAL = s.ID_SUCURSAL
+            WHERE i.STOCK > 0
+            ORDER BY p.NOMBRE, s.NOMBRE
+        """)
+        columns = [col[0].lower() for col in cursor.description]
+        inventario = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        cursor.close()
+        return jsonify({'inventario': inventario})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/productos/disponibles', methods=['GET'])
+def obtener_productos_disponibles():
+    """Endpoint específico para mostrar solo productos con stock disponible"""
+    try:
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT DISTINCT
+                p.ID_PRODUCTO,
+                p.NOMBRE,
+                p.MARCA,
+                p.DESCRIPCION,
+                p.CODIGO_INTERNO,
+                p.CODIGO_FABRICANTE,
+                p.IMAGEN,
+                p.PRECIO_UNITARIO,
+                p.ID_CATEGORIA,
+                SUM(i.STOCK) as STOCK_TOTAL,
+                COUNT(DISTINCT i.ID_SUCURSAL) as NUM_SUCURSALES,
+                MIN(s.NOMBRE) as SUCURSAL_PRINCIPAL
+            FROM PRODUCTOS p
+            JOIN INVENTARIO i ON p.ID_PRODUCTO = i.ID_PRODUCTO
+            JOIN SUCURSALES s ON i.ID_SUCURSAL = s.ID_SUCURSAL
+            WHERE i.STOCK > 0
+            GROUP BY p.ID_PRODUCTO, p.NOMBRE, p.MARCA, p.DESCRIPCION, p.CODIGO_INTERNO, p.CODIGO_FABRICANTE, p.IMAGEN, p.PRECIO_UNITARIO, p.ID_CATEGORIA
+            ORDER BY p.NOMBRE
+        """)
+        columns = [col[0].lower() for col in cursor.description]
+        productos = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        cursor.close()
+        return jsonify({'productos': productos})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/inventario', methods=['DELETE'])
 def eliminar_inventario():
     id_sucursal = request.args.get('sucursal')
@@ -523,12 +587,20 @@ def eliminar_inventario():
 def crear_carrito():
     try:
         cursor = connection.cursor()
-        cursor.execute("INSERT INTO CARRITOS DEFAULT VALUES RETURNING ID_CARRITO INTO :id", id=cursor.var(int))
-        id_carrito = cursor.getimplicitresults()[0][0]
+        
+        # Obtener el siguiente ID disponible
+        cursor.execute("SELECT NVL(MAX(ID_CARRITO), 0) + 1 FROM CARRITOS")
+        next_id = cursor.fetchone()[0]
+        
+        # Insertar carrito con ID explícito
+        cursor.execute("INSERT INTO CARRITOS (ID_CARRITO, FECHA_CREACION) VALUES (:id, SYSDATE)", id=next_id)
         connection.commit()
         cursor.close()
-        return jsonify({'id_carrito': id_carrito, 'mensaje': 'Carrito creado correctamente'})
+        
+        print(f"🛒 Carrito creado con ID: {next_id}")
+        return jsonify({'id_carrito': next_id, 'mensaje': 'Carrito creado correctamente'})
     except Exception as e:
+        print(f"❌ Error creando carrito: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/carritos/<int:id_carrito>/productos', methods=['POST'])
@@ -542,15 +614,44 @@ def agregar_producto_carrito(id_carrito):
         valor_total = data.get('valor_total')
         if not all([id_producto, id_sucursal, cantidad, valor_unitario, valor_total]):
             return jsonify({'error': 'Faltan datos'}), 400
+        
         cursor = connection.cursor()
+        
+        # Verificar si el producto ya existe en el carrito
         cursor.execute("""
-            INSERT INTO CARRITO_PRODUCTOS (ID_CARRITO, ID_PRODUCTO, ID_SUCURSAL, CANTIDAD, VALOR_UNITARIO, VALOR_TOTAL)
-            VALUES (:id_carrito, :id_producto, :id_sucursal, :cantidad, :valor_unitario, :valor_total)
-        """, id_carrito=id_carrito, id_producto=id_producto, id_sucursal=id_sucursal, cantidad=cantidad, valor_unitario=valor_unitario, valor_total=valor_total)
+            SELECT CANTIDAD, VALOR_UNITARIO FROM CARRITO_PRODUCTOS 
+            WHERE ID_CARRITO = :id_carrito AND ID_PRODUCTO = :id_producto
+        """, id_carrito=id_carrito, id_producto=id_producto)
+        
+        existing_item = cursor.fetchone()
+        
+        if existing_item:
+            # Si ya existe, actualizar la cantidad
+            nueva_cantidad = existing_item[0] + cantidad
+            nuevo_valor_total = nueva_cantidad * valor_unitario
+            
+            cursor.execute("""
+                UPDATE CARRITO_PRODUCTOS 
+                SET CANTIDAD = :cantidad, VALOR_TOTAL = :valor_total
+                WHERE ID_CARRITO = :id_carrito AND ID_PRODUCTO = :id_producto
+            """, cantidad=nueva_cantidad, valor_total=nuevo_valor_total, id_carrito=id_carrito, id_producto=id_producto)
+            
+            mensaje = 'Cantidad actualizada en el carrito'
+        else:
+            # Si no existe, insertar nuevo registro
+            cursor.execute("""
+                INSERT INTO CARRITO_PRODUCTOS (ID_CARRITO, ID_PRODUCTO, ID_SUCURSAL, CANTIDAD, VALOR_UNITARIO, VALOR_TOTAL)
+                VALUES (:id_carrito, :id_producto, :id_sucursal, :cantidad, :valor_unitario, :valor_total)
+            """, id_carrito=id_carrito, id_producto=id_producto, id_sucursal=id_sucursal, cantidad=cantidad, valor_unitario=valor_unitario, valor_total=valor_total)
+            
+            mensaje = 'Producto agregado al carrito'
+        
         connection.commit()
         cursor.close()
-        return jsonify({'mensaje': 'Producto agregado al carrito'})
+        print(f"✅ {mensaje} - Carrito: {id_carrito}, Producto: {id_producto}")
+        return jsonify({'mensaje': mensaje})
     except Exception as e:
+        print(f"❌ Error agregando producto al carrito: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/carritos/<int:id_carrito>/productos/<int:id_producto>', methods=['DELETE'])
@@ -568,7 +669,22 @@ def eliminar_producto_carrito(id_carrito, id_producto):
 def listar_productos_carrito(id_carrito):
     try:
         cursor = connection.cursor()
-        cursor.execute("SELECT ID_PRODUCTO, ID_SUCURSAL, CANTIDAD, VALOR_UNITARIO, VALOR_TOTAL FROM CARRITO_PRODUCTOS WHERE ID_CARRITO = :id_carrito", id_carrito=id_carrito)
+        cursor.execute("""
+            SELECT 
+                cp.ID_PRODUCTO,
+                cp.ID_SUCURSAL,
+                cp.CANTIDAD,
+                cp.VALOR_UNITARIO,
+                cp.VALOR_TOTAL,
+                p.NOMBRE,
+                p.MARCA,
+                p.IMAGEN,
+                s.NOMBRE as SUCURSAL_NOMBRE
+            FROM CARRITO_PRODUCTOS cp
+            JOIN PRODUCTOS p ON cp.ID_PRODUCTO = p.ID_PRODUCTO
+            JOIN SUCURSALES s ON cp.ID_SUCURSAL = s.ID_SUCURSAL
+            WHERE cp.ID_CARRITO = :id_carrito
+        """, id_carrito=id_carrito)
         columns = [col[0].lower() for col in cursor.description]
         productos = [dict(zip(columns, row)) for row in cursor.fetchall()]
         cursor.close()

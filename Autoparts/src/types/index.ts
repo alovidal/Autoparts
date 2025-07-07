@@ -60,9 +60,10 @@ export interface ProductoCarrito {
   cantidad: number;
   valor_unitario: number;
   valor_total: number;
-  nombre?: string;
-  marca?: string;
-  imagen?: string;
+  nombre: string;
+  marca: string;
+  imagen: string;
+  sucursal_nombre: string;
 }
 
 export interface Pedido {

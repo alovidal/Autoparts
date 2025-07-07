@@ -38,35 +38,44 @@ const Products: React.FC = () => {
       setLoading(true);
       setError(null);
       
-      // Cargar sucursales, categorías y productos
+      console.log('🔄 Cargando datos...');
+      
+      // Cargar sucursales, categorías y productos disponibles
       const [sucursalesData, categoriasData, productosData] = await Promise.all([
         sucursalService.obtenerSucursales(),
         categoriaService.obtenerCategorias(),
-        productoService.obtenerProductos()
+        fetch('http://localhost:5000/productos/disponibles').then(res => res.json())
       ]);
+
+      console.log('📊 Datos recibidos:', {
+        sucursales: sucursalesData.sucursales?.length || 0,
+        categorias: categoriasData.categorias?.length || 0,
+        productos: productosData.productos?.length || 0
+      });
 
       setSucursales(sucursalesData.sucursales);
       setCategorias(categoriasData.categorias);
       
       // Transformar los datos de productos para que coincidan con la interfaz
-      const transformedProducts = productosData.productos.map((product: any) => ({
-        id_producto: product.id_producto,
-        codigo_fabricante: product.codigo_fabricante || '',
-        marca: product.marca || 'Sin marca',
-        codigo_interno: product.codigo_interno || '',
-        nombre: product.nombre,
-        descripcion: product.descripcion || 'Sin descripción',
-        precio_unitario: product.precio_unitario || 0,
-        stock_min: product.stock_min || 0,
-        id_categoria: product.id_categoria,
-        imagen: product.imagen ? '/img/productos/' + product.imagen : '/img/productos/default.jpg',
-        stock: product.stock || 0,
-        sucursal: product.sucursal_nombre || 'Sin sucursal'
+      const transformed = productosData.productos.map((item: any) => ({
+        id_producto: item.id_producto,
+        nombre: item.nombre,
+        marca: item.marca || 'Sin marca',
+        descripcion: item.descripcion || 'Sin descripción',
+        precio_unitario: item.precio_unitario || 0,
+        codigo_interno: item.codigo_interno || '',
+        codigo_fabricante: item.codigo_fabricante || '',
+        id_categoria: item.id_categoria,
+        imagen: item.imagen ? '/img/productos/' + item.imagen : '/img/productos/default.jpg',
+        stock: item.stock_total,
+        sucursal: item.sucursal_principal,
+        num_sucursales: item.num_sucursales
       }));
       
-      setProducts(transformedProducts);
+      console.log('✅ Productos disponibles:', transformed.length);
+      setProducts(transformed);
     } catch (error: any) {
-      console.error('Error cargando datos:', error);
+      console.error('❌ Error cargando datos:', error);
       const errorMessage = error.response?.data?.error || 'Error al cargar los productos';
       setError(errorMessage);
       toast.error(errorMessage);
@@ -77,19 +86,29 @@ const Products: React.FC = () => {
 
   const handleAddToCart = async (product: ProductoConStock) => {
     try {
-      const success = await addToCart({
+      console.log('🛒 Intentando agregar al carrito:', product);
+      
+      // Buscar la primera sucursal disponible para este producto
+      const sucursalDisponible = sucursales.find(s => s.nombre === product.sucursal) || sucursales[0];
+      console.log('📍 Sucursal seleccionada:', sucursalDisponible);
+      
+      const cartData = {
         id_producto: product.id_producto,
-        id_sucursal: 1, // Sucursal por defecto - podrías hacer esto dinámico
+        id_sucursal: sucursalDisponible?.id_sucursal || 1,
         cantidad: 1,
         valor_unitario: product.precio_unitario,
         valor_total: product.precio_unitario * 1
-      });
+      };
+      
+      console.log('📦 Datos del carrito:', cartData);
+      
+      const success = await addToCart(cartData);
 
       if (success) {
         toast.success(`${product.nombre} agregado al carrito`);
       }
     } catch (error: any) {
-      console.error('Error agregando al carrito:', error);
+      console.error('❌ Error agregando al carrito:', error);
       const errorMessage = error.response?.data?.error || 'Error al agregar al carrito';
       toast.error(errorMessage);
     }
@@ -298,7 +317,7 @@ const Products: React.FC = () => {
                 </div>
 
                 <div className="text-xs text-gray-500 mb-3">
-                  <p>Sucursal: {product.sucursal}</p>
+                  <p>Disponible en {(product as any).num_sucursales || 1} sucursal{((product as any).num_sucursales || 1) > 1 ? 'es' : ''}</p>
                   <p>Código: {product.codigo_interno}</p>
                 </div>
 
