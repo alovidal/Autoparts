@@ -280,4 +280,43 @@ export const bitacoraService = {
   },
 };
 
+// Servicios de Transbank
+export const transbankService = {
+  crearTransaccion: async (data: {
+    id_pedido: number;
+    monto: number;
+    return_url: string;
+    session_id: string;
+    buy_order: string;
+  }): Promise<{
+    success: boolean;
+    transaccion: {
+      id_pedido: number;
+      monto: number;
+      return_url: string;
+      session_id: string;
+      buy_order: string;
+      token: string;
+      url_pago: string;
+      estado: string;
+    };
+    mensaje: string;
+  }> => {
+    const response = await api.post('/transbank/crear-transaccion', data);
+    return response.data;
+  },
+
+  confirmarPago: async (data: {
+    token: string;
+    id_pedido: number;
+  }): Promise<{
+    success: boolean;
+    mensaje: string;
+    id_pedido: number;
+  }> => {
+    const response = await api.post('/transbank/confirmar-pago', data);
+    return response.data;
+  },
+};
+
 export default api; 

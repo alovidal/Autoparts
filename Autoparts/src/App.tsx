@@ -13,6 +13,7 @@ import Categorias from './pages/Categorias';
 import MisPedidos from './pages/MisPedidos';
 import Perfil from './pages/Perfil';
 import Checkout from './pages/Checkout';
+import PaymentSuccess from './pages/PaymentSuccess';
 import AdminUsuarios from './pages/AdminUsuarios';
 import AdminProductos from './pages/AdminProductos';
 import AdminCategorias from './pages/AdminCategorias';
@@ -52,6 +53,7 @@ function App() {
                 <Route path="/mis-pedidos" element={<MisPedidos />} />
                 <Route path="/perfil" element={<Perfil />} />
                 <Route path="/checkout" element={<Checkout />} />
+                <Route path="/payment-success" element={<PaymentSuccess />} />
                 <Route path="/admin/usuarios" element={<ProtectedRoute allowedRoles={['ADMIN']}><AdminUsuarios /></ProtectedRoute>} />
                 <Route path="/admin/productos" element={<ProtectedRoute allowedRoles={['ADMIN','BODEGUERO']}><AdminProductos /></ProtectedRoute>} />
                 <Route path="/admin/categorias" element={<ProtectedRoute allowedRoles={['ADMIN','BODEGUERO']}><AdminCategorias /></ProtectedRoute>} />
