@@ -14,6 +14,7 @@ interface CartContextType {
   getCartTotal: () => number;
   getCartItemCount: () => number;
   refreshCart: () => Promise<void>;
+  resetCart: () => void; // Nueva función para resetear el carrito
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -39,68 +40,115 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
     // Verificar si hay un carrito guardado en localStorage
     const savedCartId = localStorage.getItem('cartId');
     if (savedCartId) {
-      setCartId(parseInt(savedCartId));
+      const parsedCartId = parseInt(savedCartId);
+      console.log('🔍 Carrito guardado encontrado:', parsedCartId);
+      // Verificar si el carrito existe antes de usarlo
+      verifyCartExists(parsedCartId);
     }
   }, []);
+
+  // Nueva función para verificar si el carrito existe
+  const verifyCartExists = async (id: number) => {
+    try {
+      console.log('🔍 Verificando si el carrito existe:', id);
+      const response = await fetch(`http://localhost:5000/diagnostico/carritos`);
+      const diagnostico = await response.json();
+      
+      const carritoExiste = diagnostico.carritos_existentes.some((c: any) => c.id === id);
+      
+      if (carritoExiste) {
+        console.log('✅ Carrito existe, configurando ID:', id);
+        setCartId(id);
+      } else {
+        console.log('❌ Carrito no existe, limpiando localStorage');
+        localStorage.removeItem('cartId');
+        setCartId(null);
+        setCartItems([]);
+      }
+    } catch (error) {
+      console.error('❌ Error verificando carrito:', error);
+      // En caso de error, limpiar el estado
+      localStorage.removeItem('cartId');
+      setCartId(null);
+      setCartItems([]);
+    }
+  };
 
   useEffect(() => {
     // Cargar productos del carrito cuando cambie el cartId
     if (cartId) {
-      const loadCart = async () => {
-        try {
-          setLoading(true);
-          const { productos } = await carritoService.obtenerProductos(cartId);
-          setCartItems(productos);
-        } catch (error) {
-          console.error('Error al cargar carrito:', error);
-          toast.error('Error al cargar el carrito');
-        } finally {
-          setLoading(false);
-        }
-      };
-      loadCart();
+      loadCartItems();
     } else {
-      // Si no hay cartId, limpiar los items
       setCartItems([]);
     }
   }, [cartId]);
 
+  const loadCartItems = async () => {
+    if (!cartId) return;
+
+    try {
+      setLoading(true);
+      console.log('📦 Cargando productos del carrito:', cartId);
+      const { productos } = await carritoService.obtenerProductos(cartId);
+      setCartItems(productos);
+      console.log('✅ Productos cargados:', productos.length);
+    } catch (error: any) {
+      console.error('❌ Error al cargar carrito:', error);
+      
+      // Si el carrito no existe (404), resetear el estado
+      if (error.response?.status === 404) {
+        console.log('🔄 Carrito no encontrado, reseteando estado');
+        resetCart();
+        toast.error('El carrito ha expirado, se ha creado uno nuevo');
+      } else {
+        toast.error('Error al cargar el carrito');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const createCart = async (): Promise<number> => {
     try {
+      console.log('🛒 Creando nuevo carrito...');
       const { id_carrito } = await carritoService.crearCarrito();
+      console.log('✅ Carrito creado exitosamente:', id_carrito);
+      
       setCartId(id_carrito);
       localStorage.setItem('cartId', id_carrito.toString());
       return id_carrito;
     } catch (error) {
-      console.error('Error al crear carrito:', error);
+      console.error('❌ Error al crear carrito:', error);
       throw error;
     }
   };
 
   const refreshCart = useCallback(async (): Promise<void> => {
     if (!cartId) return;
-
-    try {
-      setLoading(true);
-      const { productos } = await carritoService.obtenerProductos(cartId);
-      setCartItems(productos);
-    } catch (error) {
-      console.error('Error al cargar carrito:', error);
-      toast.error('Error al cargar el carrito');
-    } finally {
-      setLoading(false);
-    }
+    await loadCartItems();
   }, [cartId]);
+
+  const resetCart = () => {
+    console.log('🔄 Reseteando carrito');
+    setCartId(null);
+    setCartItems([]);
+    localStorage.removeItem('cartId');
+  };
 
   const addToCart = useCallback(async (data: AgregarAlCarritoRequest): Promise<boolean> => {
     try {
       setLoading(true);
       let currentCartId = cartId;
+      
+      // Si no hay carrito, crear uno nuevo
       if (!currentCartId) {
+        console.log('🛒 No hay carrito, creando uno nuevo...');
         currentCartId = await createCart();
       }
+      
       console.log('🛒 Agregando producto al carrito:', data, 'Carrito ID:', currentCartId);
 
+      // Intentar agregar el producto
       await carritoService.agregarProducto(currentCartId, {
         ...data,
         id_carrito: currentCartId,
@@ -108,12 +156,36 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
 
       console.log('✅ Producto agregado exitosamente');
       await refreshCart();
+      toast.success('Producto agregado al carrito');
       return true;
+      
     } catch (error: any) {
       console.error('❌ Error en addToCart:', error);
-      const errorMessage = error.response?.data?.error || 'Error al agregar al carrito';
-      toast.error(errorMessage);
-      return false;
+      
+      // Manejar diferentes tipos de errores
+      if (error.response?.status === 404 && error.response?.data?.error?.includes('Carrito')) {
+        console.log('🔄 Carrito no encontrado, creando uno nuevo...');
+        resetCart();
+        // Intentar de nuevo con un carrito nuevo
+        try {
+          const newCartId = await createCart();
+          await carritoService.agregarProducto(newCartId, {
+            ...data,
+            id_carrito: newCartId,
+          });
+          await refreshCart();
+          toast.success('Producto agregado al carrito');
+          return true;
+        } catch (retryError) {
+          console.error('❌ Error en reintento:', retryError);
+          toast.error('Error al agregar al carrito');
+          return false;
+        }
+      } else {
+        const errorMessage = error.response?.data?.error || 'Error al agregar al carrito';
+        toast.error(errorMessage);
+        return false;
+      }
     } finally {
       setLoading(false);
     }
@@ -192,6 +264,7 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
     getCartTotal,
     getCartItemCount,
     refreshCart,
+    resetCart,
   };
 
   return (

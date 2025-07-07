@@ -22,4 +22,5 @@ select * from DETALLE_PEDIDO;
 
 SELECT * FROM usuarios;
 
+
 SELECT * FROM SUCURSALES;

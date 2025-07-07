@@ -1,489 +1,255 @@
-# === Archivo: main.py (actualizado) ===
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect
 from flask_cors import CORS
 import oracledb
 import os
+from dotenv import load_dotenv
+from transbank.webpay.webpay_plus.transaction import Transaction
+from transbank.common.integration_type import IntegrationType
+from transbank.common.integration_commerce_codes import IntegrationCommerceCodes
 import logging
-import random
-import time
-from datetime import datetime
-from config import Config
 
-# Configurar logging
-logging.basicConfig(level=getattr(logging, Config.LOG_LEVEL))
-logger = logging.getLogger(__name__)
+load_dotenv()
 
 app = Flask(__name__)
-CORS(app, origins=Config.CORS_ORIGINS)
+CORS(app)
 
-def get_db_connection():
-    """Obtener conexión a la base de datos Oracle"""
-    try:
-        connection = oracledb.connect(
-            user=Config.DB_USER,
-            password=Config.DB_PASSWORD,
-            dsn=Config.DB_DSN,
-            config_dir=Config.DB_WALLET_DIR,
-            wallet_location=Config.DB_WALLET_DIR,
-            wallet_password=Config.DB_WALLET_PASSWORD
-        )
-        return connection
-    except Exception as e:
-        logger.error(f"Error conectando a la base de datos: {str(e)}")
-        raise e
+# Configurar logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Variable global para la conexión
-connection = None
+# Configuración de Transbank
+# Para testing (cambiar a LIVE para producción)
+Transaction.commerce_code = IntegrationCommerceCodes.WEBPAY_PLUS
+Transaction.api_key = "579B532A7440BB0C9079DED94D31EA1615BACEB56610332264630D42D0A36B1C"
+Transaction.integration_type = IntegrationType.TEST
 
-def initialize_db():
-    """Inicializar conexión a la base de datos"""
-    global connection
-    try:
-        connection = get_db_connection()
-        logger.info("✅ Conexión a base de datos establecida")
-    except Exception as e:
-        logger.error(f"❌ Error al conectar a la base de datos: {str(e)}")
+# Conexión a la base de datos
+usuario = os.getenv("usuario")
+clave = os.getenv("clave")
+wallet_dir = r"wallet"
+wallet_password = os.getenv("wallet_password")
+dsn = os.getenv("dsn")
 
-@app.before_request
-def before_request():
-    """Ejecutar antes de cada request"""
-    global connection
-    if connection is None:
-        initialize_db()
-
-@app.teardown_appcontext
-def close_db(error):
-    """Cerrar conexión a la base de datos"""
-    global connection
-    if connection:
-        try:
-            connection.close()
-        except:
-            pass
-
+try:
+    connection = oracledb.connect(
+        user=usuario,
+        password=clave,
+        dsn=dsn,
+        config_dir=wallet_dir,
+        wallet_location=wallet_dir,
+        wallet_password=wallet_password
+    )
+    print("✅ Conexión a Oracle establecida")
+except Exception as e:
+    print(f"❌ Error conectando a Oracle: {e}")
+    connection = None
 
 @app.route('/transbank/crear-transaccion', methods=['POST'])
-def crear_transaccion_transbank():
-    """Crear una nueva transacción de Transbank"""
+def crear_transaccion():
+    """Crear transacción real con Transbank WebPay Plus"""
     try:
         data = request.get_json()
         id_pedido = data.get('id_pedido')
         monto = data.get('monto')
-        return_url = data.get('return_url')
-        session_id = data.get('session_id')
-        buy_order = data.get('buy_order')
         
-        if not all([id_pedido, monto, return_url, session_id, buy_order]):
-            return jsonify({'error': 'Faltan datos requeridos'}), 400
+        # URLs de retorno
+        return_url = f"http://localhost:5001/transbank/confirmar/{id_pedido}"
         
-        logger.info(f"💳 Creando transacción Transbank: Pedido {id_pedido}, Monto {monto}")
+        # Crear transacción con Transbank
+        buy_order = f"ORDER_{id_pedido}"
+        session_id = f"SESSION_{id_pedido}"
+        amount = int(monto)  # Transbank requiere monto en enteros (pesos chilenos)
         
-        # Generar token único
-        token = f"token_{session_id}_{id_pedido}_{int(time.time())}"
+        logger.info(f"💳 Creando transacción Transbank real: Pedido {id_pedido}, Monto {amount}")
         
-        # Simular creación de transacción en Transbank
-        # En producción, aquí iría la integración real con Transbank
-        transaccion_data = {
-            'id_pedido': id_pedido,
-            'monto': monto,
-            'return_url': return_url,
-            'session_id': session_id,
-            'buy_order': buy_order,
-            'token': token,
-            'url_pago': f"https://webpay3gint.transbank.cl/webpayserver/initTransaction?token={token}",
-            'estado': 'PENDIENTE',
-            'fecha_creacion': datetime.now().isoformat()
-        }
+        # Llamada real a Transbank
+        response = Transaction().create(
+            buy_order=buy_order,
+            session_id=session_id,
+            amount=amount,
+            return_url=return_url
+        )
         
-        # Verificar que la conexión esté activa
-        if not connection:
-            logger.warning("🔄 Reconectando a la base de datos...")
-            initialize_db()
+        logger.info(f"✅ Respuesta de Transbank: {response}")
         
-        # Actualizar estado del pago en la base de datos
-        cursor = connection.cursor()
-        cursor.execute("""
-            UPDATE PAGOS 
-            SET ESTADO_PAGO = 'PROCESANDO', 
-                FECHA_PAGO = SYSDATE 
-            WHERE ID_PEDIDO = :id_pedido
-        """, id_pedido=id_pedido)
-        
-        # Registrar en bitácora
-        cursor.execute("""
-            INSERT INTO BITACORA (ID_USUARIO, ACCION, FECHA_ACCION)
-            SELECT p.ID_USUARIO, 'Transacción Transbank creada - Pedido #' || :id_pedido, SYSDATE
-            FROM PEDIDOS p WHERE p.ID_PEDIDO = :id_pedido
-        """, id_pedido=id_pedido)
-        
-        connection.commit()
-        cursor.close()
-        
-        logger.info(f"✅ Transacción creada exitosamente: {token}")
+        # Guardar el token en la base de datos para tracking
+        if connection:
+            cursor = connection.cursor()
+            cursor.execute("""
+                UPDATE PAGOS 
+                SET ESTADO_PAGO = 'PROCESANDO'
+                WHERE ID_PEDIDO = :id_pedido
+            """, {'id_pedido': id_pedido})
+            connection.commit()
+            cursor.close()
         
         return jsonify({
             'success': True,
-            'transaccion': transaccion_data,
-            'mensaje': 'Transacción creada exitosamente'
+            'token': response['token'],
+            'url': response['url'],
+            'id_pedido': id_pedido,
+            'mensaje': 'Transacción creada exitosamente. Redirigiendo a Transbank...'
         })
         
     except Exception as e:
-        logger.error(f"❌ Error al crear transacción Transbank: {str(e)}")
+        logger.error(f"❌ Error creando transacción: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/transbank/confirmar-pago', methods=['POST'])
-def confirmar_pago_transbank():
-    """Confirmar un pago de Transbank y actualizar inventario"""
+@app.route('/transbank/confirmar/<int:id_pedido>', methods=['POST', 'GET'])
+def confirmar_transaccion(id_pedido):
+    """Confirmar transacción después del pago en Transbank"""
     try:
-        data = request.get_json()
-        token = data.get('token')
-        id_pedido = data.get('id_pedido')
+        # Obtener token desde la respuesta de Transbank
+        token = request.form.get('token_ws') or request.args.get('token_ws')
         
-        if not all([token, id_pedido]):
-            return jsonify({'error': 'Faltan datos requeridos'}), 400
+        if not token:
+            logger.error("❌ No se recibió token de Transbank")
+            return redirect(f"http://localhost:5173/payment-success?order_id={id_pedido}&status=error")
         
-        logger.info(f"💳 Confirmando pago: Pedido {id_pedido}, Token: {token}")
+        logger.info(f"🔄 Confirmando transacción: Pedido {id_pedido}, Token: {token}")
         
-        cursor = connection.cursor()
+        # Confirmar transacción con Transbank
+        response = Transaction().commit(token)
         
-        # Obtener productos del carrito para actualizar inventario
-        cursor.execute("""
-            SELECT 
-                cp.ID_PRODUCTO,
-                cp.ID_SUCURSAL,
-                cp.CANTIDAD
-            FROM CARRITO_PRODUCTOS cp
-            JOIN DETALLE_PEDIDO d ON cp.ID_CARRITO = d.ID_CARRITO
-            JOIN PEDIDOS p ON d.ID_DETALLE = p.ID_DETALLE
-            WHERE p.ID_PEDIDO = :id_pedido
-        """, id_pedido=id_pedido)
+        logger.info(f"📊 Respuesta de confirmación: {response}")
         
-        productos_carrito = cursor.fetchall()
-        logger.info(f"📦 Productos en carrito: {productos_carrito}")
-        
-        # Actualizar inventario para cada producto
-        productos_actualizados = []
-        for producto in productos_carrito:
-            id_producto, id_sucursal, cantidad = producto
+        # Verificar el estado de la transacción
+        if response['status'] == 'AUTHORIZED':
+            # PAGO EXITOSO
+            logger.info(f"✅ Pago autorizado para pedido {id_pedido}")
             
-            # Verificar stock actual
-            cursor.execute("""
-                SELECT STOCK FROM INVENTARIO 
-                WHERE ID_PRODUCTO = :id_producto AND ID_SUCURSAL = :id_sucursal
-            """, id_producto=id_producto, id_sucursal=id_sucursal)
-            
-            stock_actual = cursor.fetchone()
-            if stock_actual:
-                nuevo_stock = stock_actual[0] - cantidad
-                logger.info(f"🔄 Actualizando stock: Producto {id_producto}, Sucursal {id_sucursal}, Stock actual: {stock_actual[0]}, Cantidad vendida: {cantidad}, Nuevo stock: {nuevo_stock}")
+            if connection:
+                cursor = connection.cursor()
                 
-                # Actualizar inventario
+                # 1. Actualizar estado del pago
                 cursor.execute("""
-                    UPDATE INVENTARIO 
-                    SET STOCK = :nuevo_stock 
-                    WHERE ID_PRODUCTO = :id_producto AND ID_SUCURSAL = :id_sucursal
-                """, nuevo_stock=nuevo_stock, id_producto=id_producto, id_sucursal=id_sucursal)
+                    UPDATE PAGOS 
+                    SET ESTADO_PAGO = 'PAGADO', 
+                        FECHA_PAGO = SYSDATE
+                    WHERE ID_PEDIDO = :id_pedido
+                """, {'id_pedido': id_pedido})
                 
-                productos_actualizados.append({
-                    'id_producto': id_producto,
-                    'id_sucursal': id_sucursal,
-                    'cantidad_vendida': cantidad,
-                    'stock_anterior': stock_actual[0],
-                    'stock_nuevo': nuevo_stock
+                # 2. Actualizar estado del pedido
+                cursor.execute("""
+                    UPDATE DETALLE_PEDIDO 
+                    SET ESTADO = 'CONFIRMADO' 
+                    WHERE ID_DETALLE = (SELECT ID_DETALLE FROM PEDIDOS WHERE ID_PEDIDO = :id_pedido)
+                """, {'id_pedido': id_pedido})
+                
+                # 3. Actualizar inventario (rebajar stock)
+                cursor.execute("""
+                    SELECT cp.ID_PRODUCTO, cp.ID_SUCURSAL, cp.CANTIDAD
+                    FROM CARRITO_PRODUCTOS cp
+                    JOIN DETALLE_PEDIDO dp ON cp.ID_CARRITO = dp.ID_CARRITO
+                    JOIN PEDIDOS p ON dp.ID_DETALLE = p.ID_DETALLE
+                    WHERE p.ID_PEDIDO = :id_pedido
+                """, {'id_pedido': id_pedido})
+                
+                productos = cursor.fetchall()
+                for producto in productos:
+                    id_producto, id_sucursal, cantidad = producto
+                    cursor.execute("""
+                        UPDATE INVENTARIO 
+                        SET STOCK = STOCK - :cantidad 
+                        WHERE ID_PRODUCTO = :id_producto AND ID_SUCURSAL = :id_sucursal
+                    """, {
+                        'cantidad': cantidad,
+                        'id_producto': id_producto,
+                        'id_sucursal': id_sucursal
+                    })
+                    logger.info(f"📦 Stock actualizado: Producto {id_producto}, Cantidad -{cantidad}")
+                
+                # 4. Registrar en bitácora
+                cursor.execute("""
+                    INSERT INTO BITACORA (ID_USUARIO, ACCION, FECHA_ACCION)
+                    SELECT p.ID_USUARIO, 
+                           'Pago Transbank REAL exitoso - Pedido #' || :id_pedido || 
+                           ' - Autorización: ' || :auth_code, 
+                           SYSDATE
+                    FROM PEDIDOS p WHERE p.ID_PEDIDO = :id_pedido
+                """, {
+                    'id_pedido': id_pedido,
+                    'auth_code': response.get('authorization_code', 'N/A')
                 })
+                
+                connection.commit()
+                cursor.close()
+                logger.info(f"✅ Base de datos actualizada para pedido {id_pedido}")
+            
+            # Redirigir a página de éxito
+            return redirect(f"http://localhost:5173/payment-success?order_id={id_pedido}&status=success&auth_code={response.get('authorization_code')}")
         
-        # Actualizar estado del pago
-        cursor.execute("""
-            UPDATE PAGOS 
-            SET ESTADO_PAGO = 'APROBADO', 
-                FECHA_PAGO = SYSDATE 
-            WHERE ID_PEDIDO = :id_pedido
-        """, id_pedido=id_pedido)
-        
-        # Actualizar estado del pedido
-        cursor.execute("""
-            UPDATE DETALLE_PEDIDO 
-            SET ESTADO = 'CONFIRMADO' 
-            WHERE ID_DETALLE = (
-                SELECT ID_DETALLE FROM PEDIDOS WHERE ID_PEDIDO = :id_pedido
-            )
-        """, id_pedido=id_pedido)
-        
-        # Registrar en bitácora
-        cursor.execute("""
-            INSERT INTO BITACORA (ID_USUARIO, ACCION, FECHA_ACCION)
-            SELECT p.ID_USUARIO, 'Pago confirmado - Pedido #' || :id_pedido || ' - Inventario actualizado', SYSDATE
-            FROM PEDIDOS p WHERE p.ID_PEDIDO = :id_pedido
-        """, id_pedido=id_pedido)
-        
-        connection.commit()
-        cursor.close()
-        
-        logger.info(f"✅ Pago confirmado exitosamente para pedido {id_pedido}")
-        
-        return jsonify({
-            'success': True,
-            'mensaje': 'Pago confirmado exitosamente',
-            'id_pedido': id_pedido,
-            'productos_actualizados': productos_actualizados,
-            'total_productos': len(productos_actualizados)
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Error al confirmar pago: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/transbank/estadisticas', methods=['GET'])
-def obtener_estadisticas_transbank():
-    """Obtener estadísticas de transacciones Transbank"""
-    try:
-        cursor = connection.cursor()
-        
-        # Estadísticas de pagos
-        cursor.execute("""
-            SELECT 
-                COUNT(*) as total_pagos,
-                SUM(CASE WHEN ESTADO_PAGO = 'APROBADO' THEN 1 ELSE 0 END) as pagos_exitosos,
-                SUM(CASE WHEN ESTADO_PAGO = 'PENDIENTE' THEN 1 ELSE 0 END) as pagos_pendientes,
-                SUM(CASE WHEN ESTADO_PAGO = 'FALLIDO' THEN 1 ELSE 0 END) as pagos_fallidos,
-                SUM(MONTO_TOTAL) as monto_total
-            FROM PAGOS
-            WHERE METODO_PAGO = 'TRANSBANK'
-        """)
-        
-        stats_pagos = cursor.fetchone()
-        
-        # Estadísticas de pedidos
-        cursor.execute("""
-            SELECT 
-                COUNT(*) as total_pedidos,
-                SUM(CASE WHEN d.ESTADO = 'CONFIRMADO' THEN 1 ELSE 0 END) as pedidos_confirmados,
-                SUM(CASE WHEN d.ESTADO = 'PENDIENTE' THEN 1 ELSE 0 END) as pedidos_pendientes
-            FROM PEDIDOS p
-            JOIN DETALLE_PEDIDO d ON p.ID_DETALLE = d.ID_DETALLE
-            JOIN PAGOS pg ON p.ID_PEDIDO = pg.ID_PEDIDO
-            WHERE pg.METODO_PAGO = 'TRANSBANK'
-        """)
-        
-        stats_pedidos = cursor.fetchone()
-        
-        # Productos más vendidos
-        cursor.execute("""
-            SELECT 
-                p.NOMBRE,
-                p.MARCA,
-                SUM(cp.CANTIDAD) as cantidad_vendida,
-                SUM(cp.VALOR_TOTAL) as valor_total
-            FROM CARRITO_PRODUCTOS cp
-            JOIN PRODUCTOS p ON cp.ID_PRODUCTO = p.ID_PRODUCTO
-            JOIN DETALLE_PEDIDO d ON cp.ID_CARRITO = d.ID_CARRITO
-            JOIN PEDIDOS ped ON d.ID_DETALLE = ped.ID_DETALLE
-            JOIN PAGOS pg ON ped.ID_PEDIDO = pg.ID_PEDIDO
-            WHERE pg.ESTADO_PAGO = 'APROBADO' AND pg.METODO_PAGO = 'TRANSBANK'
-            GROUP BY p.ID_PRODUCTO, p.NOMBRE, p.MARCA
-            ORDER BY cantidad_vendida DESC
-            FETCH FIRST 5 ROWS ONLY
-        """)
-        
-        productos_vendidos = []
-        for row in cursor.fetchall():
-            productos_vendidos.append({
-                'nombre': row[0],
-                'marca': row[1],
-                'cantidad_vendida': row[2],
-                'valor_total': float(row[3]) if row[3] else 0
-            })
-        
-        # Estadísticas de simulación
-        cursor.execute("""
-            SELECT 
-                COUNT(*) as total_transacciones,
-                SUM(CASE WHEN ESTADO_PAGO = 'APROBADO' THEN 1 ELSE 0 END) as exitosas,
-                SUM(CASE WHEN ESTADO_PAGO = 'PENDIENTE' THEN 1 ELSE 0 END) as pendientes,
-                SUM(CASE WHEN ESTADO_PAGO = 'FALLIDO' THEN 1 ELSE 0 END) as fallidas
-            FROM PAGOS
-            WHERE METODO_PAGO = 'TRANSBANK'
-        """)
-        
-        stats_simulacion = cursor.fetchone()
-        
-        cursor.close()
-        
-        return jsonify({
-            'pagos': {
-                'total': stats_pagos[0],
-                'exitosos': stats_pagos[1],
-                'pendientes': stats_pagos[2],
-                'fallidos': stats_pagos[3],
-                'monto_total': float(stats_pagos[4]) if stats_pagos[4] else 0
-            },
-            'pedidos': {
-                'total': stats_pedidos[0],
-                'confirmados': stats_pedidos[1],
-                'pendientes': stats_pedidos[2]
-            },
-            'productos_mas_vendidos': productos_vendidos,
-            'simulacion': {
-                'total_transacciones': stats_simulacion[0],
-                'exitosas': stats_simulacion[1],
-                'pendientes': stats_simulacion[2],
-                'fallidas': stats_simulacion[3]
-            },
-            'configuracion': {
-                'ambiente': Config.TRANSBANK_ENVIRONMENT,
-                'modo_simulacion': Config.is_simulation_mode(),
-                'tasa_exito': Config.SIMULATION_SUCCESS_RATE,
-                'tasa_pendiente': Config.SIMULATION_PENDING_RATE,
-                'tasa_fallo': Config.SIMULATION_FAILURE_RATE
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Error al obtener estadísticas: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/transbank/simular-pago', methods=['POST'])
-def simular_pago_transbank():
-    """Simular un pago con diferentes escenarios"""
-    try:
-        data = request.get_json()
-        id_pedido = data.get('id_pedido')
-        escenario = data.get('escenario', 'aleatorio')  # aleatorio, exito, pendiente, fallo
-        
-        if not id_pedido:
-            return jsonify({'error': 'ID de pedido requerido'}), 400
-        
-        logger.info(f"🎲 Simulando pago: Pedido {id_pedido}, Escenario: {escenario}")
-        
-        # Determinar resultado según escenario
-        if escenario == 'aleatorio':
-            resultado = random.choices(
-                ['exito', 'pendiente', 'fallo'],
-                weights=[Config.SIMULATION_SUCCESS_RATE, Config.SIMULATION_PENDING_RATE, Config.SIMULATION_FAILURE_RATE]
-            )[0]
         else:
-            resultado = escenario
-        
-        # Simular tiempo de procesamiento
-        time.sleep(random.uniform(1, 3))
-        
-        cursor = connection.cursor()
-        
-        if resultado == 'exito':
-            # Procesar pago exitoso
-            estado_pago = 'APROBADO'
-            mensaje = 'Pago procesado exitosamente'
+            # PAGO FALLIDO
+            logger.warning(f"❌ Pago no autorizado para pedido {id_pedido}: {response['status']}")
             
-            # Actualizar inventario (igual que en confirmar-pago)
-            cursor.execute("""
-                SELECT 
-                    cp.ID_PRODUCTO,
-                    cp.ID_SUCURSAL,
-                    cp.CANTIDAD
-                FROM CARRITO_PRODUCTOS cp
-                JOIN DETALLE_PEDIDO d ON cp.ID_CARRITO = d.ID_CARRITO
-                JOIN PEDIDOS p ON d.ID_DETALLE = p.ID_DETALLE
-                WHERE p.ID_PEDIDO = :id_pedido
-            """, id_pedido=id_pedido)
-            
-            productos_carrito = cursor.fetchall()
-            
-            for producto in productos_carrito:
-                id_producto, id_sucursal, cantidad = producto
+            if connection:
+                cursor = connection.cursor()
                 cursor.execute("""
-                    UPDATE INVENTARIO 
-                    SET STOCK = STOCK - :cantidad 
-                    WHERE ID_PRODUCTO = :id_producto AND ID_SUCURSAL = :id_sucursal
-                """, cantidad=cantidad, id_producto=id_producto, id_sucursal=id_sucursal)
+                    UPDATE PAGOS 
+                    SET ESTADO_PAGO = 'FALLIDO', 
+                        FECHA_PAGO = SYSDATE 
+                    WHERE ID_PEDIDO = :id_pedido
+                """, {'id_pedido': id_pedido})
+                connection.commit()
+                cursor.close()
             
-            # Actualizar estado del pedido
-            cursor.execute("""
-                UPDATE DETALLE_PEDIDO 
-                SET ESTADO = 'CONFIRMADO' 
-                WHERE ID_DETALLE = (
-                    SELECT ID_DETALLE FROM PEDIDOS WHERE ID_PEDIDO = :id_pedido
-                )
-            """, id_pedido=id_pedido)
-            
-        elif resultado == 'pendiente':
-            estado_pago = 'PENDIENTE'
-            mensaje = 'Pago en revisión por el banco'
-            
-        else:  # fallo
-            estado_pago = 'FALLIDO'
-            mensaje = 'Pago rechazado por el banco'
-        
-        # Actualizar estado del pago
-        cursor.execute("""
-            UPDATE PAGOS 
-            SET ESTADO_PAGO = :estado_pago, 
-                FECHA_PAGO = SYSDATE 
-            WHERE ID_PEDIDO = :id_pedido
-        """, estado_pago=estado_pago, id_pedido=id_pedido)
-        
-        # Registrar en bitácora
-        cursor.execute("""
-            INSERT INTO BITACORA (ID_USUARIO, ACCION, FECHA_ACCION)
-            SELECT p.ID_USUARIO, 'Simulación Transbank - ' || :estado_pago || ' - Pedido #' || :id_pedido, SYSDATE
-            FROM PEDIDOS p WHERE p.ID_PEDIDO = :id_pedido
-        """, estado_pago=estado_pago, id_pedido=id_pedido)
-        
-        connection.commit()
-        cursor.close()
-        
-        logger.info(f"✅ Simulación completada: {resultado}")
-        
-        return jsonify({
-            'success': True,
-            'resultado': resultado,
-            'estado_pago': estado_pago,
-            'mensaje': mensaje,
-            'id_pedido': id_pedido,
-            'inventario_actualizado': resultado == 'exito'
-        })
+            return redirect(f"http://localhost:5173/payment-success?order_id={id_pedido}&status=failed")
         
     except Exception as e:
-        logger.error(f"❌ Error en simulación: {str(e)}")
+        logger.error(f"❌ Error confirmando transacción: {e}")
+        return redirect(f"http://localhost:5173/payment-success?order_id={id_pedido}&status=error")
+
+@app.route('/transbank/estado-pedido/<int:id_pedido>', methods=['GET'])
+def estado_pedido(id_pedido):
+    """Obtener estado actual del pedido"""
+    try:
+        if not connection:
+            return jsonify({'error': 'Sin conexión a base de datos'}), 500
+            
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT 
+                p.ID_PEDIDO,
+                dp.ESTADO as ESTADO_PEDIDO,
+                pg.ESTADO_PAGO,
+                pg.MONTO_TOTAL,
+                p.FECHA_PEDIDO
+            FROM PEDIDOS p
+            JOIN DETALLE_PEDIDO dp ON p.ID_DETALLE = dp.ID_DETALLE
+            LEFT JOIN PAGOS pg ON p.ID_PEDIDO = pg.ID_PEDIDO
+            WHERE p.ID_PEDIDO = :id_pedido
+        """, {'id_pedido': id_pedido})
+        
+        result = cursor.fetchone()
+        cursor.close()
+        
+        if result:
+            return jsonify({
+                'id_pedido': result[0],
+                'estado_pedido': result[1],
+                'estado_pago': result[2],
+                'monto_total': float(result[3]) if result[3] else 0,
+                'fecha_pedido': str(result[4])
+            })
+        else:
+            return jsonify({'error': 'Pedido no encontrado'}), 404
+            
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo estado: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/transbank/health', methods=['GET'])
-def health_check():
-    """Endpoint para verificar el estado de la API Transbank"""
-    try:
-        if connection:
-            # Verificar conexión a la base de datos
-            cursor = connection.cursor()
-            cursor.execute("SELECT 1 FROM DUAL")
-            cursor.fetchone()
-            cursor.close()
-            
-            return jsonify({
-                'status': 'healthy',
-                'service': 'API Transbank',
-                'message': 'API Transbank funcionando correctamente',
-                'database': 'connected',
-                'environment': Config.TRANSBANK_ENVIRONMENT,
-                'simulation_mode': Config.is_simulation_mode(),
-                'timestamp': datetime.now().isoformat()
-            })
-        else:
-            return jsonify({
-                'status': 'unhealthy',
-                'service': 'API Transbank',
-                'message': 'Error de conexión a la base de datos',
-                'database': 'disconnected'
-            }), 500
-    except Exception as e:
-        logger.error(f"Error en health check: {str(e)}")
-        return jsonify({
-            'status': 'unhealthy',
-            'service': 'API Transbank',
-            'message': str(e),
-            'database': 'error'
-        }), 500
+def health():
+    """Health check"""
+    return jsonify({
+        'status': 'ok',
+        'service': 'Transbank API REAL',
+        'environment': 'TEST' if Transaction.integration_type == IntegrationType.TEST else 'LIVE',
+        'database': 'connected' if connection else 'disconnected'
+    })
 
 if __name__ == '__main__':
-    logger.info(f"🚀 Iniciando API Transbank en puerto {Config.API_PORT}")
-    logger.info(f"🌍 Ambiente: {Config.TRANSBANK_ENVIRONMENT}")
-    logger.info(f"🎲 Modo simulación: {Config.is_simulation_mode()}")
-    app.run(debug=Config.DEBUG, host=Config.API_HOST, port=Config.API_PORT) 
+    print("🚀 Iniciando API Transbank REAL en puerto 5001")
+    print(f"🔧 Ambiente: {'TEST' if Transaction.integration_type == IntegrationType.TEST else 'LIVE'}")
+    app.run(debug=True, host='0.0.0.0', port=5001)

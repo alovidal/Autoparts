@@ -588,21 +588,24 @@ def crear_carrito():
     try:
         cursor = connection.cursor()
         
-        # Obtener el siguiente ID disponible
-        cursor.execute("SELECT NVL(MAX(ID_CARRITO), 0) + 1 FROM CARRITOS")
-        next_id = cursor.fetchone()[0]
+        # Usar la secuencia automática de Oracle (más confiable)
+        cursor.execute("INSERT INTO CARRITOS (FECHA_CREACION) VALUES (SYSDATE)")
         
-        # Insertar carrito con ID explícito
-        cursor.execute("INSERT INTO CARRITOS (ID_CARRITO, FECHA_CREACION) VALUES (:id, SYSDATE)", id=next_id)
+        # Obtener el ID del carrito recién creado
+        cursor.execute("SELECT ID_CARRITO FROM CARRITOS WHERE ROWID = (SELECT MAX(ROWID) FROM CARRITOS)")
+        id_carrito = cursor.fetchone()[0]
+        
         connection.commit()
         cursor.close()
         
-        print(f"🛒 Carrito creado con ID: {next_id}")
-        return jsonify({'id_carrito': next_id, 'mensaje': 'Carrito creado correctamente'})
+        print(f"🛒 Carrito creado con ID: {id_carrito}")
+        return jsonify({'id_carrito': id_carrito, 'mensaje': 'Carrito creado correctamente'})
     except Exception as e:
         print(f"❌ Error creando carrito: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
+       
 @app.route('/carritos/<int:id_carrito>/productos', methods=['POST'])
 def agregar_producto_carrito(id_carrito):
     try:
