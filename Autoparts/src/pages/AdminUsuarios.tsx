@@ -4,7 +4,7 @@ import { Usuario } from '../types';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 
-const roles = ['CLIENTE', 'DISTRIBUIDOR', 'BODEGUERO', 'ADMIN'];
+const roles = ['CLIENTE', 'EMPRESA', 'DISTRIBUIDOR', 'BODEGUERO', 'ADMIN'];
 
 const AdminUsuarios: React.FC = () => {
   const { user } = useAuth();

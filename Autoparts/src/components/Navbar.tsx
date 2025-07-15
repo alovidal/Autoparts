@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useCart } from '../contexts/CartContext';
-import { ShoppingCartIcon, UserIcon, Bars3Icon, XMarkIcon, BriefcaseIcon, WrenchScrewdriverIcon, TruckIcon } from '@heroicons/react/24/outline';
+import { ShoppingCartIcon, UserIcon, Bars3Icon, XMarkIcon, BriefcaseIcon, WrenchScrewdriverIcon, TruckIcon, BuildingOfficeIcon } from '@heroicons/react/24/outline';
 
 const Navbar: React.FC = () => {
   const { user, logout, isAuthenticated } = useAuth();
@@ -75,7 +75,7 @@ const Navbar: React.FC = () => {
                   Mis Pedidos
                 </Link>
               )}
-              {isAuthenticated && (user?.rol === 'ADMIN' || user?.rol === 'BODEGUERO' || user?.rol === 'DISTRIBUIDOR') && (
+              {isAuthenticated && (user?.rol === 'ADMIN' || user?.rol === 'BODEGUERO' || user?.rol === 'DISTRIBUIDOR' || user?.rol === 'EMPRESA') && (
                 <div className="relative">
                   <button
                     onClick={() => setIsAdminMenuOpen(!isAdminMenuOpen)}
@@ -85,6 +85,7 @@ const Navbar: React.FC = () => {
                       {user?.rol === 'ADMIN' && <BriefcaseIcon className="w-5 h-5 text-blue-700" />}
                       {user?.rol === 'BODEGUERO' && <WrenchScrewdriverIcon className="w-5 h-5 text-yellow-600" />}
                       {user?.rol === 'DISTRIBUIDOR' && <TruckIcon className="w-5 h-5 text-green-700" />}
+                      {user?.rol === 'EMPRESA' && <BuildingOfficeIcon className="w-5 h-5 text-purple-600" />}
                       Admin
                     </span>
                     <svg className={`w-4 h-4 transition-transform ${isAdminMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
@@ -122,6 +123,13 @@ const Navbar: React.FC = () => {
                         <>
                           <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-100 text-green-700 font-bold"><TruckIcon className="w-5 h-5" /> Distribuidor</div>
                           <Link to="/admin/pedidos" className="block px-4 py-2 text-green-700 hover:bg-green-50 rounded transition" onClick={() => setIsAdminMenuOpen(false)}>Pedidos</Link>
+                        </>
+                      )}
+                      {user?.rol === 'EMPRESA' && (
+                        <>
+                          <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-100 text-purple-700 font-bold"><BuildingOfficeIcon className="w-5 h-5" /> Empresa</div>
+                          <Link to="/admin/pedidos" className="block px-4 py-2 text-purple-700 hover:bg-purple-50 rounded transition" onClick={() => setIsAdminMenuOpen(false)}>Mis Pedidos</Link>
+                          <Link to="/admin/transbank" className="block px-4 py-2 text-purple-700 hover:bg-purple-50 rounded transition" onClick={() => setIsAdminMenuOpen(false)}>Simulador Transbank</Link>
                         </>
                       )}
                     </div>
@@ -291,7 +299,7 @@ const Navbar: React.FC = () => {
                   </Link>
                 </>
               )}
-              {isAuthenticated && (user?.rol === 'ADMIN' || user?.rol === 'BODEGUERO' || user?.rol === 'DISTRIBUIDOR') && (
+              {isAuthenticated && (user?.rol === 'ADMIN' || user?.rol === 'BODEGUERO' || user?.rol === 'DISTRIBUIDOR' || user?.rol === 'EMPRESA') && (
                 <Link
                   to="/admin"
                   className="block px-4 py-2 text-blue-700 hover:bg-blue-50 rounded text-base font-semibold"
@@ -304,7 +312,7 @@ const Navbar: React.FC = () => {
           </div>
         )}
         {/* Menú móvil admin */}
-        {isAuthenticated && (user?.rol === 'ADMIN' || user?.rol === 'BODEGUERO' || user?.rol === 'DISTRIBUIDOR') && isMenuOpen && (
+        {isAuthenticated && (user?.rol === 'ADMIN' || user?.rol === 'BODEGUERO' || user?.rol === 'DISTRIBUIDOR' || user?.rol === 'EMPRESA') && isMenuOpen && (
           <div className="border-t border-gray-100 py-2">
             <div className="font-bold text-blue-700 px-4 py-1">Admin</div>
             {user?.rol === 'ADMIN' && (
@@ -329,6 +337,13 @@ const Navbar: React.FC = () => {
             {/* Solo para distribuidor */}
             {user?.rol === 'DISTRIBUIDOR' && (
               <Link to="/admin/pedidos" className="block px-4 py-2 text-blue-700 hover:bg-blue-50 rounded text-base font-semibold" onClick={() => setIsMenuOpen(false)}>Pedidos</Link>
+            )}
+            {/* Solo para empresa */}
+            {user?.rol === 'EMPRESA' && (
+              <>
+                <Link to="/admin/pedidos" className="block px-4 py-2 text-purple-700 hover:bg-purple-50 rounded text-base font-semibold" onClick={() => setIsMenuOpen(false)}>Mis Pedidos</Link>
+                <Link to="/admin/transbank" className="block px-4 py-2 text-purple-700 hover:bg-purple-50 rounded text-base font-semibold" onClick={() => setIsMenuOpen(false)}>Simulador Transbank</Link>
+              </>
             )}
           </div>
         )}

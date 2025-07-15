@@ -3,7 +3,7 @@ export interface Usuario {
   rut: string;
   nombre_completo: string;
   correo: string;
-  rol: 'CLIENTE' | 'DISTRIBUIDOR' | 'BODEGUERO' | 'ADMIN';
+  rol: 'CLIENTE' | 'EMPRESA' | 'DISTRIBUIDOR' | 'BODEGUERO' | 'ADMIN';
   fecha_registro: string;
 }
 
@@ -102,6 +102,34 @@ export interface RegistroRequest {
   contrasena: string;
   rol: string;
 }
+
+// Función para calcular descuentos por rol
+export const calcularDescuento = (rol: string, precioOriginal: number): { precioConDescuento: number; descuentoAplicado: number; porcentajeDescuento: number } => {
+  let porcentajeDescuento = 0;
+  
+  switch (rol) {
+    case 'EMPRESA':
+      porcentajeDescuento = 15; // 15% de descuento para empresas
+      break;
+    case 'DISTRIBUIDOR':
+      porcentajeDescuento = 10; // 10% de descuento para distribuidores
+      break;
+    case 'BODEGUERO':
+      porcentajeDescuento = 5; // 5% de descuento para bodegueros
+      break;
+    default:
+      porcentajeDescuento = 0; // Sin descuento para clientes normales y admin
+  }
+  
+  const descuentoAplicado = (precioOriginal * porcentajeDescuento) / 100;
+  const precioConDescuento = precioOriginal - descuentoAplicado;
+  
+  return {
+    precioConDescuento: Math.round(precioConDescuento),
+    descuentoAplicado: Math.round(descuentoAplicado),
+    porcentajeDescuento
+  };
+};
 
 export interface AgregarAlCarritoRequest {
   id_carrito?: number;

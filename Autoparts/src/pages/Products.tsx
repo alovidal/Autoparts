@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useCart } from '../contexts/CartContext';
+import { useAuth } from '../contexts/AuthContext';
 import { productoService, sucursalService, categoriaService } from '../services/api';
-import { ProductoConStock, Sucursal, Categoria } from '../types';
+import { ProductoConStock, Sucursal, Categoria, calcularDescuento } from '../types';
 import { MagnifyingGlassIcon, FunnelIcon, ShoppingCartIcon } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -19,6 +20,7 @@ const Products: React.FC = () => {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   const { addToCart } = useCart();
+  const { user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -92,12 +94,16 @@ const Products: React.FC = () => {
       const sucursalDisponible = sucursales.find(s => s.nombre === product.sucursal) || sucursales[0];
       console.log('📍 Sucursal seleccionada:', sucursalDisponible);
       
+      // Calcular precio con descuento si aplica
+      const descuento = user?.rol ? calcularDescuento(user.rol, product.precio_unitario) : null;
+      const precioFinal = descuento?.precioConDescuento || product.precio_unitario;
+      
       const cartData = {
         id_producto: product.id_producto,
         id_sucursal: sucursalDisponible?.id_sucursal || 1,
         cantidad: 1,
-        valor_unitario: product.precio_unitario,
-        valor_total: product.precio_unitario * 1
+        valor_unitario: precioFinal,
+        valor_total: precioFinal * 1
       };
       
       console.log('📦 Datos del carrito:', cartData);
@@ -153,11 +159,27 @@ const Products: React.FC = () => {
     }
   });
 
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat('es-CL', {
+  const formatPrice = (price: number, showDiscount = true) => {
+    const formattedPrice = new Intl.NumberFormat('es-CL', {
       style: 'currency',
       currency: 'CLP'
     }).format(price);
+    
+    if (showDiscount && user?.rol) {
+      const descuento = calcularDescuento(user.rol, price);
+      if (descuento.porcentajeDescuento > 0) {
+        return {
+          original: formattedPrice,
+          conDescuento: new Intl.NumberFormat('es-CL', {
+            style: 'currency',
+            currency: 'CLP'
+          }).format(descuento.precioConDescuento),
+          porcentaje: descuento.porcentajeDescuento
+        };
+      }
+    }
+    
+    return { original: formattedPrice };
   };
 
   if (loading) {
@@ -304,9 +326,32 @@ const Products: React.FC = () => {
                 </p>
 
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-2xl font-bold text-gray-900">
-                    {formatPrice(product.precio_unitario)}
-                  </span>
+                  <div className="flex flex-col">
+                    {(() => {
+                      const precio = formatPrice(product.precio_unitario);
+                      return (
+                        <>
+                          {precio.conDescuento ? (
+                            <>
+                              <span className="text-lg font-bold text-gray-900">
+                                {precio.conDescuento}
+                              </span>
+                              <span className="text-sm text-gray-500 line-through">
+                                {precio.original}
+                              </span>
+                              <span className="text-xs text-green-600 font-semibold">
+                                -{precio.porcentaje}% descuento
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-2xl font-bold text-gray-900">
+                              {precio.original}
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
                   <span className={`text-sm px-2 py-1 rounded-full ${
                     product.stock > 10 ? 'bg-green-100 text-green-800' :
                     product.stock > 0 ? 'bg-yellow-100 text-yellow-800' :

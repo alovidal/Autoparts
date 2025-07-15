@@ -586,26 +586,166 @@ def eliminar_inventario():
 @app.route('/carritos', methods=['POST'])
 def crear_carrito():
     try:
+        data = request.get_json()
+        id_usuario = data.get('id_usuario')  # Puede ser None para invitados
+        session_id = data.get('session_id')  # Para carritos de invitados
+        nombre_carrito = data.get('nombre_carrito', 'Carrito Principal')
+        
+        print(f"🛒 Creando carrito - Usuario: {id_usuario}, Session: {session_id}")
+        
         cursor = connection.cursor()
         
-        # Usar la secuencia automática de Oracle (más confiable)
-        cursor.execute("INSERT INTO CARRITOS (FECHA_CREACION) VALUES (SYSDATE)")
+        # Validar que solo uno de los dos esté presente
+        if id_usuario and session_id:
+            return jsonify({'error': 'No se puede especificar usuario y session_id simultáneamente'}), 400
         
-        # Obtener el ID del carrito recién creado
-        cursor.execute("SELECT ID_CARRITO FROM CARRITOS WHERE ROWID = (SELECT MAX(ROWID) FROM CARRITOS)")
-        id_carrito = cursor.fetchone()[0]
+        if not id_usuario and not session_id:
+            return jsonify({'error': 'Debe especificar id_usuario o session_id'}), 400
+        
+        # Si es usuario registrado, verificar que existe
+        if id_usuario:
+            cursor.execute("SELECT COUNT(*) FROM USUARIOS WHERE ID_USUARIO = :id_usuario", id_usuario=id_usuario)
+            if cursor.fetchone()[0] == 0:
+                return jsonify({'error': 'Usuario no encontrado'}), 404
+        
+        # Crear carrito
+        cursor.execute("""
+            INSERT INTO CARRITOS (ID_USUARIO, SESSION_ID, NOMBRE_CARRITO, FECHA_CREACION, FECHA_ULTIMA_ACTIVIDAD)
+            VALUES (:id_usuario, :session_id, :nombre_carrito, SYSDATE, SYSDATE)
+            RETURNING ID_CARRITO INTO :id_carrito
+        """, id_usuario=id_usuario, session_id=session_id, nombre_carrito=nombre_carrito, id_carrito=cursor.var(int))
+        
+        id_carrito = cursor.var.getvalue()
+        connection.commit()
+        cursor.close()
+        
+        print(f"✅ Carrito creado con ID: {id_carrito}")
+        return jsonify({
+            'id_carrito': id_carrito, 
+            'mensaje': 'Carrito creado correctamente',
+            'tipo': 'usuario' if id_usuario else 'invitado'
+        })
+    except Exception as e:
+        print(f"❌ Error creando carrito: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/carritos/usuario/<int:id_usuario>', methods=['GET'])
+def obtener_carritos_usuario(id_usuario):
+    """Obtener todos los carritos de un usuario registrado"""
+    try:
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT 
+                c.ID_CARRITO,
+                c.NOMBRE_CARRITO,
+                c.ESTADO,
+                c.FECHA_CREACION,
+                c.FECHA_ULTIMA_ACTIVIDAD,
+                COUNT(cp.ID_PRODUCTO) as NUM_PRODUCTOS,
+                SUM(cp.VALOR_TOTAL) as TOTAL_CARRITO
+            FROM CARRITOS c
+            LEFT JOIN CARRITO_PRODUCTOS cp ON c.ID_CARRITO = cp.ID_CARRITO
+            WHERE c.ID_USUARIO = :id_usuario AND c.ESTADO = 'ACTIVO'
+            GROUP BY c.ID_CARRITO, c.NOMBRE_CARRITO, c.ESTADO, c.FECHA_CREACION, c.FECHA_ULTIMA_ACTIVIDAD
+            ORDER BY c.FECHA_ULTIMA_ACTIVIDAD DESC
+        """, id_usuario=id_usuario)
+        
+        columns = [col[0].lower() for col in cursor.description]
+        carritos = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        cursor.close()
+        
+        return jsonify({'carritos': carritos})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/carritos/session/<session_id>', methods=['GET'])
+def obtener_carrito_invitado(session_id):
+    """Obtener carrito de invitado por session_id"""
+    try:
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT 
+                c.ID_CARRITO,
+                c.NOMBRE_CARRITO,
+                c.ESTADO,
+                c.FECHA_CREACION,
+                c.FECHA_ULTIMA_ACTIVIDAD,
+                COUNT(cp.ID_PRODUCTO) as NUM_PRODUCTOS,
+                SUM(cp.VALOR_TOTAL) as TOTAL_CARRITO
+            FROM CARRITOS c
+            LEFT JOIN CARRITO_PRODUCTOS cp ON c.ID_CARRITO = cp.ID_CARRITO
+            WHERE c.SESSION_ID = :session_id AND c.ESTADO = 'ACTIVO'
+            GROUP BY c.ID_CARRITO, c.NOMBRE_CARRITO, c.ESTADO, c.FECHA_CREACION, c.FECHA_ULTIMA_ACTIVIDAD
+        """, session_id=session_id)
+        
+        row = cursor.fetchone()
+        cursor.close()
+        
+        if row:
+            columns = ['id_carrito', 'nombre_carrito', 'estado', 'fecha_creacion', 'fecha_ultima_actividad', 'num_productos', 'total_carrito']
+            return jsonify(dict(zip(columns, row)))
+        else:
+            return jsonify({'error': 'Carrito de invitado no encontrado'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/carritos/<int:id_carrito>/actualizar_actividad', methods=['PUT'])
+def actualizar_actividad_carrito(id_carrito):
+    """Actualizar fecha de última actividad del carrito"""
+    try:
+        cursor = connection.cursor()
+        cursor.execute("""
+            UPDATE CARRITOS 
+            SET FECHA_ULTIMA_ACTIVIDAD = SYSDATE 
+            WHERE ID_CARRITO = :id_carrito
+        """, id_carrito=id_carrito)
+        connection.commit()
+        cursor.close()
+        return jsonify({'mensaje': 'Actividad actualizada'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/carritos/<int:id_carrito>/convertir/<int:id_usuario>', methods=['POST'])
+def convertir_carrito_invitado(id_carrito, id_usuario):
+    """Convertir carrito de invitado a carrito de usuario registrado"""
+    try:
+        cursor = connection.cursor()
+        
+        # Verificar que el carrito existe y es de invitado
+        cursor.execute("""
+            SELECT SESSION_ID, ESTADO FROM CARRITOS 
+            WHERE ID_CARRITO = :id_carrito
+        """, id_carrito=id_carrito)
+        
+        carrito = cursor.fetchone()
+        if not carrito:
+            return jsonify({'error': 'Carrito no encontrado'}), 404
+        
+        if not carrito[0]:  # Si SESSION_ID es NULL, ya es carrito de usuario
+            return jsonify({'error': 'El carrito ya pertenece a un usuario'}), 400
+        
+        if carrito[1] != 'ACTIVO':
+            return jsonify({'error': 'El carrito no está activo'}), 400
+        
+        # Verificar que el usuario existe
+        cursor.execute("SELECT COUNT(*) FROM USUARIOS WHERE ID_USUARIO = :id_usuario", id_usuario=id_usuario)
+        if cursor.fetchone()[0] == 0:
+            return jsonify({'error': 'Usuario no encontrado'}), 404
+        
+        # Convertir el carrito
+        cursor.execute("""
+            UPDATE CARRITOS 
+            SET ID_USUARIO = :id_usuario, SESSION_ID = NULL, ESTADO = 'CONVERTIDO'
+            WHERE ID_CARRITO = :id_carrito
+        """, id_usuario=id_usuario, id_carrito=id_carrito)
         
         connection.commit()
         cursor.close()
         
-        print(f"🛒 Carrito creado con ID: {id_carrito}")
-        return jsonify({'id_carrito': id_carrito, 'mensaje': 'Carrito creado correctamente'})
+        return jsonify({'mensaje': 'Carrito convertido exitosamente'})
     except Exception as e:
-        print(f"❌ Error creando carrito: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-       
+
 @app.route('/carritos/<int:id_carrito>/productos', methods=['POST'])
 def agregar_producto_carrito(id_carrito):
     try:
@@ -619,6 +759,18 @@ def agregar_producto_carrito(id_carrito):
             return jsonify({'error': 'Faltan datos'}), 400
         
         cursor = connection.cursor()
+        
+        # Verificar que el carrito existe y está activo
+        cursor.execute("""
+            SELECT ESTADO FROM CARRITOS WHERE ID_CARRITO = :id_carrito
+        """, id_carrito=id_carrito)
+        
+        carrito = cursor.fetchone()
+        if not carrito:
+            return jsonify({'error': 'Carrito no encontrado'}), 404
+        
+        if carrito[0] != 'ACTIVO':
+            return jsonify({'error': 'El carrito no está activo'}), 400
         
         # Verificar si el producto ya existe en el carrito
         cursor.execute("""
@@ -635,7 +787,7 @@ def agregar_producto_carrito(id_carrito):
             
             cursor.execute("""
                 UPDATE CARRITO_PRODUCTOS 
-                SET CANTIDAD = :cantidad, VALOR_TOTAL = :valor_total
+                SET CANTIDAD = :cantidad, VALOR_TOTAL = :valor_total, FECHA_AGREGADO = SYSDATE
                 WHERE ID_CARRITO = :id_carrito AND ID_PRODUCTO = :id_producto
             """, cantidad=nueva_cantidad, valor_total=nuevo_valor_total, id_carrito=id_carrito, id_producto=id_producto)
             
@@ -643,11 +795,18 @@ def agregar_producto_carrito(id_carrito):
         else:
             # Si no existe, insertar nuevo registro
             cursor.execute("""
-                INSERT INTO CARRITO_PRODUCTOS (ID_CARRITO, ID_PRODUCTO, ID_SUCURSAL, CANTIDAD, VALOR_UNITARIO, VALOR_TOTAL)
-                VALUES (:id_carrito, :id_producto, :id_sucursal, :cantidad, :valor_unitario, :valor_total)
+                INSERT INTO CARRITO_PRODUCTOS (ID_CARRITO, ID_PRODUCTO, ID_SUCURSAL, CANTIDAD, VALOR_UNITARIO, VALOR_TOTAL, FECHA_AGREGADO)
+                VALUES (:id_carrito, :id_producto, :id_sucursal, :cantidad, :valor_unitario, :valor_total, SYSDATE)
             """, id_carrito=id_carrito, id_producto=id_producto, id_sucursal=id_sucursal, cantidad=cantidad, valor_unitario=valor_unitario, valor_total=valor_total)
             
             mensaje = 'Producto agregado al carrito'
+        
+        # Actualizar fecha de última actividad del carrito
+        cursor.execute("""
+            UPDATE CARRITOS 
+            SET FECHA_ULTIMA_ACTIVIDAD = SYSDATE 
+            WHERE ID_CARRITO = :id_carrito
+        """, id_carrito=id_carrito)
         
         connection.commit()
         cursor.close()
@@ -702,9 +861,17 @@ def actualizar_cantidad_carrito(id_carrito, id_producto):
         cursor.execute("""
             UPDATE CARRITO_PRODUCTOS 
             SET CANTIDAD = :cantidad, 
-                VALOR_TOTAL = CANTIDAD * VALOR_UNITARIO 
+                VALOR_TOTAL = CANTIDAD * VALOR_UNITARIO,
+                FECHA_AGREGADO = SYSDATE
             WHERE ID_CARRITO = :id_carrito AND ID_PRODUCTO = :id_producto
         """, cantidad=nueva_cantidad, id_carrito=id_carrito, id_producto=id_producto)
+        
+        # Actualizar fecha de última actividad del carrito
+        cursor.execute("""
+            UPDATE CARRITOS 
+            SET FECHA_ULTIMA_ACTIVIDAD = SYSDATE 
+            WHERE ID_CARRITO = :id_carrito
+        """, id_carrito=id_carrito)
         
         connection.commit()
         cursor.close()
@@ -718,6 +885,21 @@ def actualizar_cantidad_carrito(id_carrito, id_producto):
 def listar_productos_carrito(id_carrito):
     try:
         cursor = connection.cursor()
+        
+        # Verificar que el carrito existe y está activo
+        cursor.execute("""
+            SELECT c.ESTADO, c.ID_USUARIO, c.SESSION_ID, c.NOMBRE_CARRITO
+            FROM CARRITOS c WHERE c.ID_CARRITO = :id_carrito
+        """, id_carrito=id_carrito)
+        
+        carrito_info = cursor.fetchone()
+        if not carrito_info:
+            return jsonify({'error': 'Carrito no encontrado'}), 404
+        
+        if carrito_info[0] != 'ACTIVO':
+            return jsonify({'error': 'El carrito no está activo'}), 400
+        
+        # Obtener productos del carrito
         cursor.execute("""
             SELECT 
                 cp.ID_PRODUCTO,
@@ -725,19 +907,39 @@ def listar_productos_carrito(id_carrito):
                 cp.CANTIDAD,
                 cp.VALOR_UNITARIO,
                 cp.VALOR_TOTAL,
+                cp.FECHA_AGREGADO,
                 p.NOMBRE,
                 p.MARCA,
                 p.IMAGEN,
+                p.DESCRIPCION,
                 s.NOMBRE as SUCURSAL_NOMBRE
             FROM CARRITO_PRODUCTOS cp
             JOIN PRODUCTOS p ON cp.ID_PRODUCTO = p.ID_PRODUCTO
             JOIN SUCURSALES s ON cp.ID_SUCURSAL = s.ID_SUCURSAL
             WHERE cp.ID_CARRITO = :id_carrito
+            ORDER BY cp.FECHA_AGREGADO DESC
         """, id_carrito=id_carrito)
+        
         columns = [col[0].lower() for col in cursor.description]
         productos = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        
+        # Calcular total del carrito
+        total_carrito = sum(p['valor_total'] for p in productos)
+        
         cursor.close()
-        return jsonify({'productos': productos})
+        
+        return jsonify({
+            'productos': productos,
+            'total_carrito': total_carrito,
+            'num_productos': len(productos),
+            'carrito_info': {
+                'id_carrito': id_carrito,
+                'estado': carrito_info[0],
+                'id_usuario': carrito_info[1],
+                'session_id': carrito_info[2],
+                'nombre_carrito': carrito_info[3]
+            }
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -745,10 +947,122 @@ def listar_productos_carrito(id_carrito):
 def vaciar_carrito(id_carrito):
     try:
         cursor = connection.cursor()
+        
+        # Verificar que el carrito existe y está activo
+        cursor.execute("SELECT ESTADO FROM CARRITOS WHERE ID_CARRITO = :id_carrito", id_carrito=id_carrito)
+        carrito = cursor.fetchone()
+        
+        if not carrito:
+            return jsonify({'error': 'Carrito no encontrado'}), 404
+        
+        if carrito[0] != 'ACTIVO':
+            return jsonify({'error': 'El carrito no está activo'}), 400
+        
         cursor.execute("DELETE FROM CARRITO_PRODUCTOS WHERE ID_CARRITO = :id_carrito", id_carrito=id_carrito)
+        
+        # Actualizar fecha de última actividad
+        cursor.execute("""
+            UPDATE CARRITOS 
+            SET FECHA_ULTIMA_ACTIVIDAD = SYSDATE 
+            WHERE ID_CARRITO = :id_carrito
+        """, id_carrito=id_carrito)
+        
         connection.commit()
         cursor.close()
         return jsonify({'mensaje': 'Carrito vaciado correctamente'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/carritos/limpiar_invitados', methods=['DELETE'])
+def limpiar_carritos_invitados_antiguos():
+    """Limpiar carritos de invitados con más de 30 días de inactividad"""
+    try:
+        cursor = connection.cursor()
+        
+        # Marcar carritos de invitados antiguos como eliminados
+        cursor.execute("""
+            UPDATE CARRITOS 
+            SET ESTADO = 'ELIMINADO' 
+            WHERE SESSION_ID IS NOT NULL 
+            AND FECHA_ULTIMA_ACTIVIDAD < SYSDATE - 30
+            AND ESTADO = 'ACTIVO'
+        """)
+        
+        carritos_limpiados = cursor.rowcount
+        connection.commit()
+        cursor.close()
+        
+        return jsonify({
+            'mensaje': f'Se limpiaron {carritos_limpiados} carritos de invitados antiguos'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/carritos/estadisticas', methods=['GET'])
+def estadisticas_carritos():
+    """Obtener estadísticas de carritos"""
+    try:
+        cursor = connection.cursor()
+        
+        # Carritos activos por tipo
+        cursor.execute("""
+            SELECT 
+                CASE 
+                    WHEN ID_USUARIO IS NOT NULL THEN 'USUARIOS_REGISTRADOS'
+                    ELSE 'INVITADOS'
+                END as TIPO,
+                COUNT(*) as CANTIDAD
+            FROM CARRITOS 
+            WHERE ESTADO = 'ACTIVO'
+            GROUP BY CASE 
+                WHEN ID_USUARIO IS NOT NULL THEN 'USUARIOS_REGISTRADOS'
+                ELSE 'INVITADOS'
+            END
+        """)
+        
+        tipos_carrito = cursor.fetchall()
+        
+        # Total de productos en carritos activos
+        cursor.execute("""
+            SELECT COUNT(*) as TOTAL_PRODUCTOS
+            FROM CARRITO_PRODUCTOS cp
+            JOIN CARRITOS c ON cp.ID_CARRITO = c.ID_CARRITO
+            WHERE c.ESTADO = 'ACTIVO'
+        """)
+        
+        total_productos = cursor.fetchone()[0]
+        
+        # Carritos con más productos
+        cursor.execute("""
+            SELECT 
+                c.ID_CARRITO,
+                c.NOMBRE_CARRITO,
+                COUNT(cp.ID_PRODUCTO) as NUM_PRODUCTOS,
+                SUM(cp.VALOR_TOTAL) as TOTAL_VALOR
+            FROM CARRITOS c
+            JOIN CARRITO_PRODUCTOS cp ON c.ID_CARRITO = cp.ID_CARRITO
+            WHERE c.ESTADO = 'ACTIVO'
+            GROUP BY c.ID_CARRITO, c.NOMBRE_CARRITO
+            ORDER BY NUM_PRODUCTOS DESC
+            FETCH FIRST 5 ROWS ONLY
+        """)
+        
+        carritos_top = cursor.fetchall()
+        
+        cursor.close()
+        
+        return jsonify({
+            'tipos_carrito': [{'tipo': row[0], 'cantidad': row[1]} for row in tipos_carrito],
+            'total_productos_en_carritos': total_productos,
+            'carritos_con_mas_productos': [
+                {
+                    'id_carrito': row[0],
+                    'nombre_carrito': row[1],
+                    'num_productos': row[2],
+                    'total_valor': float(row[3]) if row[3] else 0
+                } for row in carritos_top
+            ]
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
